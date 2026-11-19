@@ -11,7 +11,7 @@ ONE = 4096
 FIXED_SHIFT = 12
 
 
-def FixHalfRound(x, bits=FIXED_SHIFT):
+def FixHalfRound(x: int, bits: int = FIXED_SHIFT) -> int:
     """Round x to nearest 2**bits, C-style (toward zero on ties-ish)."""
     """Round x to the nearest multiple of 2**bits, ties away-ish (C style)."""
     if x >= 0:
@@ -19,12 +19,12 @@ def FixHalfRound(x, bits=FIXED_SHIFT):
     return (x - (1 << (bits - 1))) >> bits
 
 
-def FIXEDH(a):
+def FIXEDH(a: int) -> int:
     """FixHalfRound(a, 12) -- half-round to integer world units."""
     return FixHalfRound(a, FIXED_SHIFT)
 
 
-def FIXED(a):
+def FIXED(a: int) -> int:
     """a >> 12 -- truncate fixed-point to integer (toward zero)."""
     """a >> 12 -- truncate fixed-point to integer."""
     if a >= 0:
@@ -33,11 +33,11 @@ def FIXED(a):
     return -((-a) >> FIXED_SHIFT)
 
 
-def ABS(a):
+def ABS(a: int) -> int:
     return a if a >= 0 else -a
 
 
-def clamp(a, lo, hi):
+def clamp(a, lo, hi) -> int:  # works for int/float inputs
     if a < lo:
         return lo
     if a > hi:
@@ -59,19 +59,19 @@ def _build_trig():
 _TRIG = _build_trig()
 
 
-def RSIN(a):
+def RSIN(a: int) -> int:
     """Sine of angle a (4096 circle units). Returns fixed-point int."""
     idx = a & (ONE - 1)
     return int(_TRIG[idx][0] * ONE)
 
 
-def RCOS(a):
+def RCOS(a: int) -> int:
     """Cosine of angle a (4096 circle units). Returns fixed-point int."""
     idx = a & (ONE - 1)
     return int(_TRIG[idx][1] * ONE)
 
 
-def ratan2(y, x):
+def ratan2(y, x) -> int:
     """atan2 in 4096 circle units."""
     if x == 0 and y == 0:
         return 0
