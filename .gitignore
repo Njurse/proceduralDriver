@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+saves/save.json
+saves/save.json.tmp
+saves/generated/
+saves/smoke_*.png
+.venv/
+reference/

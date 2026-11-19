@@ -1,0 +1,95 @@
+{
+  "discovered_planets": [
+    "347:1"
+  ],
+  "foot": {
+    "pos": [
+      -945.2130126953125,
+      1885.4150390625,
+      11.802058219909668
+    ],
+    "yaw": 30.26701915041411
+  },
+  "fuel": {
+    "fuel": 100.0,
+    "pulse_fuel": 100.0
+  },
+  "galaxy_return": {
+    "hpr": [
+      94.09173583984375,
+      -18.556602478027344,
+      22.692813873291016
+    ],
+    "pos": [
+      -6497.98876953125,
+      3313.897216796875,
+      34.41395568847656
+    ],
+    "throttle": 1.0
+  },
+  "inventory": {
+    "cols": 6,
+    "counts": {},
+    "rows": 4,
+    "slots": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "mode": "atmosphere",
+  "on_foot": true,
+  "planet_index": 1,
+  "play_time": 689.52,
+  "saved_at": "2026-11-18T19:07:01",
+  "seed": 448026,
+  "selected_ship": null,
+  "settings": {
+    "control_sensitivity": 1.0,
+    "effects_volume": 1.0,
+    "gamepad_deadzone": 0.16,
+    "invert_y": false,
+    "master_volume": 1.0,
+    "mouse_sensitivity": 1.0
+  },
+  "ship": {
+    "hpr": [
+      -0.18520376086235046,
+      -0.5078179836273193,
+      8.987183570861816
+    ],
+    "pos": [
+      -1131.5985107421875,
+      2000.468017578125,
+      31.79323387145996
+    ],
+    "throttle": 0.0
+  },
+  "system_index": 347,
+  "version": 5,
+  "visited_systems": [
+    347,
+    387
+  ]
+}

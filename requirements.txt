@@ -1,0 +1,6 @@
+panda3d==1.10.16
+panda3d-gltf
+numpy
+pygame-ce
+pillow
+pytest
