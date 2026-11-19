@@ -198,26 +198,34 @@ class Vehicle:
 
 
 class PhysicsWorld:
-    def __init__(self, track=None):
+    """Steps all vehicles and resolves collisions against the track."""
+
+    def __init__(self, track=None, substeps=1):
         self.vehicles = []
         self.track = track
+        self.substeps = max(1, int(substeps))
 
     def add(self, v):
         self.vehicles.append(v)
 
-    def step(self, dt: float) -> None:  # StepOneCar
-        for v in self.vehicles:
-            v.step(dt)
-            if self.track is not None:
-                corr = self.track.collide_car(
-                    v.position.x / ONE, v.position.z / ONE, 2.0, 1.0, v._yaw_rad())
-                for nx, nz, depth in corr:
-                    v.position.x += int(nx * depth * ONE * 0.5)
-                    v.position.z += int(nz * depth * ONE * 0.5)
-                    vn = (v.linear_velocity.x / ONE) * nx + (v.linear_velocity.z / ONE) * nz
-                    if vn < 0:
-                        v.linear_velocity.x -= int(vn * nx * ONE * 0.5)
-                        v.linear_velocity.z -= int(vn * nz * ONE * 0.5)
+    def step(self, dt: float) -> None:  # GlobalTimeStep
+        sub_dt = dt / self.substeps
+        for _ in range(self.substeps):
+            for v in self.vehicles:
+                v.step(sub_dt)
+                if self.track is not None:
+                    self._resolve_collisions(v)
+
+    def _resolve_collisions(self, v) -> None:  # bcollided2d / bFindCollisionPoint
+        corr = self.track.collide_car(
+            v.position.x / ONE, v.position.z / ONE, 2.0, 1.0, v._yaw_rad())
+        for nx, nz, depth in corr:
+            v.position.x += int(nx * depth * ONE * 0.5)
+            v.position.z += int(nz * depth * ONE * 0.5)
+            vn = (v.linear_velocity.x / ONE) * nx + (v.linear_velocity.z / ONE) * nz
+            if vn < 0:
+                v.linear_velocity.x -= int(vn * nx * ONE * 0.5)
+                v.linear_velocity.z -= int(vn * nz * ONE * 0.5)
 
 
 if __name__ == "__main__":
