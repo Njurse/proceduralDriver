@@ -6,3 +6,5 @@ saves/generated/
 saves/smoke_*.png
 .venv/
 reference/
+saves/*.jpg
+saves/*.png
