@@ -12,6 +12,7 @@ FIXED_SHIFT = 12
 
 
 def FixHalfRound(x, bits=FIXED_SHIFT):
+    """Round x to nearest 2**bits, C-style (toward zero on ties-ish)."""
     """Round x to the nearest multiple of 2**bits, ties away-ish (C style)."""
     if x >= 0:
         return (x + (1 << (bits - 1))) >> bits
@@ -24,6 +25,7 @@ def FIXEDH(a):
 
 
 def FIXED(a):
+    """a >> 12 -- truncate fixed-point to integer (toward zero)."""
     """a >> 12 -- truncate fixed-point to integer."""
     if a >= 0:
         return a >> FIXED_SHIFT
