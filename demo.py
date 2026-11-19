@@ -20,7 +20,7 @@ except Exception as e:
     print("pygame required:", e)
     sys.exit(1)
 
-from core.fixedpoint import ONE
+
 from core.car_profile import load_cosmetics
 from core.redriver2_physics import Vehicle, PhysicsWorld
 from core.track import Track, OBBWall
@@ -141,11 +141,12 @@ def main():
             pygame.draw.polygon(screen, (60, 60, 70), pts, 2)
 
         # car
-        yaw = vehicle._yaw_rad()
+        yaw = vehicle.yaw_rad
         cos_y = math.cos(yaw)
         sin_y = math.sin(yaw)
-        vx = vehicle.position.x / ONE
-        vz = vehicle.position.z / ONE
+        _pm = vehicle.position_m
+        vx = _pm[0]
+        vz = _pm[2]
         car_screen_pts = []
         for (lx, lz) in car_pts[0]:
             # rotate local point by yaw

@@ -44,10 +44,9 @@ class CarCosmetics:
     raw: str = ""
 
 
-def _remap_wheel_textures(base_dir):
-    # Real PNGs live under assets/vehicle/wheels/havana/
-    wdir = os.path.join(base_dir, "..", "wheels", "havana")
-    wdir = os.path.normpath(wdir)
+def resolve_wheel_textures(base_dir: str) -> dict:
+    """Resolve wheel texture paths (assets/vehicle/wheels/havana/)."""
+    wdir = os.path.normpath(os.path.join(base_dir, "..", "wheels", "havana"))
     return {
         "clean": os.path.join(wdir, "wheelclean.png"),
         "damaged": os.path.join(wdir, "wheeldam_fixed.png"),
@@ -55,7 +54,8 @@ def _remap_wheel_textures(base_dir):
     }
 
 
-def _remap_sounds(base_dir):
+def resolve_sounds(base_dir: str) -> dict:
+    """Resolve sound asset paths (assets/sounds/vehicle/...)."""
     sdir = os.path.join(base_dir, "..", "..", "sounds", "vehicle", "havana_model0")
     sdir = os.path.normpath(sdir)
     common = os.path.join(os.path.dirname(sdir), "common")
@@ -66,7 +66,15 @@ def _remap_sounds(base_dir):
     }
 
 
-def load_obj(path, invert_vertical=False):
+def resolve_assets(base_dir: str) -> dict:
+    """Resolve all asset paths for a car profile directory."""
+    return {
+        "wheel_textures": resolve_wheel_textures(base_dir),
+        "sounds": resolve_sounds(base_dir),
+    }
+
+
+def load_obj(path: str, invert_vertical: bool = False):
     """Parse a minimal Wavefront OBJ into (vertices, faces)."""
     verts = []
     faces = []
@@ -95,7 +103,7 @@ def load_obj(path, invert_vertical=False):
     return verts, faces
 
 
-def load_cosmetics(path=None, invert_vertical=None):
+def load_cosmetics(path: str = None, invert_vertical: bool = None) -> "CarCosmetics":
     if path is None:
         path = config.HAVANA_HANDLING_JSON
     if invert_vertical is None:
@@ -122,8 +130,9 @@ def load_cosmetics(path=None, invert_vertical=None):
     cos.twist_rate_z = h.get("twistRateZ", 0)
     cos.extra_info = h.get("extraInfo", 0)
     cos.cb_y_offset = h.get("cbYoffset", 0)
-    cos.wheel_textures = _remap_wheel_textures(base_dir)
-    cos.sounds = _remap_sounds(base_dir)
+    assets = resolve_assets(base_dir)
+    cos.wheel_textures = assets["wheel_textures"]
+    cos.sounds = assets["sounds"]
     cos.invert_vertical = bool(invert_vertical)
     cos.raw = data.get("raw", "")
 
