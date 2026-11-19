@@ -14,6 +14,14 @@ except ModuleNotFoundError:
     import config
 from core.fixedpoint import (ONE, FIXED, FIXEDH, RSIN, RCOS, clamp, Vec3)
 from core.track import surface_at
+try:
+    from core.physics_helpers import (steering_update, auto_brake_update,
+                                     thrust_from_input, friction_scales,
+                                     STEER_MAX)
+except Exception:
+    from physics_helpers import (steering_update, auto_brake_update,
+                                 thrust_from_input, friction_scales,
+                                 STEER_MAX)
 
 
 class HandlingType:
@@ -58,7 +66,7 @@ class Vehicle:
         self.fast_steer = False
         self.speed = 0.0
 
-    def reset(self, x=0.0, z=0.0, yaw=0.0):
+    def reset(self, x: float = 0.0, z: float = 0.0, yaw: float = 0.0) -> None:  # InitCarPhysics
         self.position = Vec3(int(x * ONE), 0, int(z * ONE))
         self.orientation = int((yaw / (2 * math.pi)) * ONE) & (ONE - 1)
         self.angular_velocity = Vec3(0, 0, 0)
@@ -79,7 +87,24 @@ class Vehicle:
     def _yaw_rad(self):
         return (self.orientation / ONE) * 2.0 * math.pi
 
-    def process_input(self, inp):
+    # -- convenience accessors (float, intuitive units) ---------------------
+    @property
+    def yaw_rad(self):
+        return self._yaw_rad()
+
+    @property
+    def yaw_deg(self):
+        return self.yaw_rad * 180.0 / math.pi
+
+    @property
+    def position_m(self):
+        return (self.position.x / ONE, 0.0, self.position.z / ONE)
+
+    @property
+    def velocity_m(self):
+        return (self.linear_velocity.x / ONE, 0.0, self.linear_velocity.z / ONE)
+
+    def process_input(self, inp) -> None:  # ProcessCarPad
         self.steer_input = float(getattr(inp, "steer", 0.0))
         self.fast_steer = bool(getattr(inp, "fast_steer", False))
         self.throttle_input = float(getattr(inp, "throttle", 0.0))
@@ -87,100 +112,72 @@ class Vehicle:
         self.handbrake = 1 if getattr(inp, "handbrake", False) else 0
         self.wheelspin = 1 if (self.throttle_input > 0.5 and getattr(inp, "wheelspin", False)) else 0
 
-        inc = 64 if self.fast_steer else 32
-        target = int(self.steer_input * 511)
-        if self.wheel_angle < target:
-            self.wheel_angle = min(target, self.wheel_angle + inc)
-        elif self.wheel_angle > target:
-            self.wheel_angle = max(target, self.wheel_angle - inc)
-
-        if abs(self.steer_input) < 0.05:
-            if self.wheel_angle > 0:
-                self.wheel_angle = max(0, self.wheel_angle - 16)
-            elif self.wheel_angle < 0:
-                self.wheel_angle = min(0, self.wheel_angle + 16)
-
-        if self.handling.auto_brake_on:
-            if self.brake_input > 0.1:
-                self.auto_brake = min(90, self.auto_brake + 6)
-            else:
-                self.auto_brake = max(0, self.auto_brake - 3)
-
-        pr = self.cos.power_ratio
-        if self.brake_input > 0.1:
-            self.thrust = -FIXEDH(pr * int(self.brake_input * 4096))
-        elif self.throttle_input > 0.0:
-            base = FIXEDH(pr * 4915)
-            if self.wheelspin:
-                base = base * 13 // 10
-            self.thrust = base * int(self.throttle_input * 1000) // 1000
-        else:
-            self.thrust = 0
+        self.wheel_angle = steering_update(self.wheel_angle, self.steer_input,
+                                          self.fast_steer)
+        self.auto_brake = auto_brake_update(self.auto_brake, self.brake_input,
+                                           bool(self.handling.auto_brake_on))
+        self.thrust = thrust_from_input(self.cos.power_ratio, self.throttle_input,
+                                       self.brake_input, bool(self.wheelspin))
 
     def _get_friction_scales(self):
-        pr = self.cos.power_ratio
-        traction = self.cos.traction
-        front_scale = traction
-        rear_scale = traction
-        if self.thrust < 0:
-            rear_scale = FIXEDH(rear_scale * 11 // 10)
-        if self.handbrake:
-            rear_scale = FIXEDH(rear_scale * 4 // 10)
-        if self.wheelspin:
-            rear_scale = FIXEDH(rear_scale * 7 // 10)
-        for w in self.wheels:
-            if w.on_grass:
-                front_scale = FIXEDH(front_scale * 6 // 10)
-                rear_scale = FIXEDH(rear_scale * 6 // 10)
-        if self.auto_brake > 0:
-            rear_scale = FIXEDH(rear_scale * (100 - self.auto_brake) // 100)
-        ratio = self.handling.friction_scale_ratio
-        front_scale = FIXEDH(front_scale * ratio // 32)
-        rear_scale = FIXEDH(rear_scale * ratio // 32)
-        return front_scale, rear_scale
+        any_grass = any(w.on_grass for w in self.wheels)
+        return friction_scales(self.cos, self.handling, self.thrust,
+                              bool(self.handbrake), bool(self.wheelspin),
+                              self.auto_brake, any_grass)
 
-    def step(self, dt):
+    def step(self, dt: float) -> None:  # StepOneCar
+        # Phase 1: forces
+        self._compute_forces(dt)
+        # Phase 2: integration
+        self._integrate(dt)
+        # Phase 3: wheel data (provisional; TODO wire AddWheelForcesDriver1)
+        self._update_wheels()
+
+    def _compute_forces(self, dt):
         yaw = self._yaw_rad()
-        fx = math.cos(yaw)
-        fz = math.sin(yaw)
-        vx = self.linear_velocity.x / ONE
-        vz = self.linear_velocity.z / ONE
-        speed = vx * fx + vz * fz
-        self.speed = speed
+        self._fx = math.cos(yaw)
+        self._fz = math.sin(yaw)
+        self._vx = self.linear_velocity.x / ONE
+        self._vz = self.linear_velocity.z / ONE
+        self._speed = self._vx * self._fx + self._vz * self._fz
+        self.speed = self._speed
 
         front_scale, rear_scale = self._get_friction_scales()
 
         ax = 0.0
         az = 0.0
         thrust_f = self.thrust / ONE
-        ax += fx * thrust_f * 2.0
-        az += fz * thrust_f * 2.0
+        ax += self._fx * thrust_f * 2.0
+        az += self._fz * thrust_f * 2.0
 
-        steer_norm = self.wheel_angle / 511.0 if abs(self.wheel_angle) > 0 else 0.0
-        yaw_torque = steer_norm * (min(abs(speed), 30.0) * 0.08 + 0.6)
+        steer_norm = (self.wheel_angle / 511.0) if abs(self.wheel_angle) > 0 else 0.0
+        self._yaw_torque = steer_norm * (min(abs(self._speed), 30.0) * 0.08 + 0.6)
 
-        drag = 0.3 + (0.002 * speed * speed)
-        ax -= vx * drag
-        az -= vz * drag
+        drag = 0.3 + (0.002 * self._speed * self._speed)
+        ax -= self._vx * drag
+        az -= self._vz * drag
 
-        rx = -fz
-        rz = fx
-        side = vx * rx + vz * rz
+        self._rx = -self._fz
+        self._rz = self._fx
+        self._side = self._vx * self._rx + self._vz * self._rz
         grip = (front_scale + rear_scale) / (2 * ONE) * 1.2
-        ax -= rx * side * grip
-        az -= rz * side * grip
+        ax -= self._rx * self._side * grip
+        az -= self._rz * self._side * grip
 
         if self.handbrake:
             ax *= 0.6
             az *= 0.6
 
-        # integrate (velocity in units/s)
-        vx2 = vx + ax * dt
-        vz2 = vz + az * dt
+        self._ax = ax
+        self._az = az
+
+    def _integrate(self, dt):
+        vx2 = self._vx + self._ax * dt
+        vz2 = self._vz + self._az * dt
         self.linear_velocity.x = int(vx2 * ONE)
         self.linear_velocity.z = int(vz2 * ONE)
 
-        d_yaw = yaw_torque * dt
+        d_yaw = self._yaw_torque * dt
         self.orientation = (self.orientation + int((d_yaw / (2 * math.pi)) * ONE)) & (ONE - 1)
 
         px = self.position.x / ONE + vx2 * dt
@@ -188,9 +185,10 @@ class Vehicle:
         self.position.x = int(px * ONE)
         self.position.z = int(pz * ONE)
 
+    def _update_wheels(self):
         for i, w in enumerate(self.wheels):
-            w.wheel_speed = int(abs(speed) * ONE * 0.5)
-            w.slip_lateral = abs(side) * 0.5
+            w.wheel_speed = int(abs(self._speed) * ONE * 0.5)
+            w.slip_lateral = abs(self._side) * 0.5
             w.slip_longitudinal = abs(self.thrust / ONE) * 0.001
             w.locked = 1 if (self.handbrake and i >= 2) else 0
             w.texture_fast = abs(w.wheel_speed) > config.WHEEL_FAST_TEXTURE_SPEED
@@ -207,7 +205,7 @@ class PhysicsWorld:
     def add(self, v):
         self.vehicles.append(v)
 
-    def step(self, dt):
+    def step(self, dt: float) -> None:  # StepOneCar
         for v in self.vehicles:
             v.step(dt)
             if self.track is not None:
