@@ -7,7 +7,8 @@ below:
 ``terrain``  the biome's height field (worldgen.height.Terrain: fbm, ridged
              or terraced noise) and the colour ramp its chunks are painted with
 ``roads``    the roads the biome grows (world.roads), with
-             optional dashed centre ``markings``
+             optional dashed centre ``markings`` and a ``roadside`` profile
+             (sidewalk, kerb, verge, shoulder, low wall) laid along each side
 ``weight``   (top level) how often worldgen.regions picks the biome for a region
 ``region_size`` (top level) the biome claims blocks of this many x this many
              region sites, so 3 makes regions about three times as wide
@@ -59,6 +60,27 @@ class TerrainRules:
 
 
 @dataclass(frozen=True)
+class RoadsideRules:
+    """What lines each side of a road, inner (road edge) to outer.  Visual only:
+    the ground and the physics never see it.  ``side_m`` 0 (the default): nothing."""
+
+    side_m: float = 0.0              # strip width beyond the road edge; 0: none
+    lift_m: float = 0.0              # its top above the road (a kerbed sidewalk ~0.15)
+    curb_m: float = 0.0              # a kerb band this wide at the road edge
+    color: RGB = (0.58, 0.58, 0.56)
+    curb_color: RGB = (0.74, 0.74, 0.72)
+    edge_light: float = 0.0          # the outer edge this much lighter (0..0.5)
+    wall_h_m: float = 0.0            # a low wall / hedge along the outer edge; 0: none
+    wall_w_m: float = 0.6
+    wall_color: RGB = (0.52, 0.50, 0.45)
+
+    @property
+    def reach_m(self):
+        """How far past the road edge the roadside (wall included) reaches."""
+        return self.side_m + (self.wall_w_m if self.wall_h_m > 0.0 else 0.0)
+
+
+@dataclass(frozen=True)
 class RoadRules:
     grid_spacing_m: float = 200.0    # distance between parallel roads
     jitter_m: float = 25.0           # random shift of each grid node
@@ -75,6 +97,7 @@ class RoadRules:
     loop_odds: float = 0.12          # organic: odds a short non-tree link makes a loop
     l_corner_odds: float = 0.0       # organic: odds a road turns a square L corner
     corner_radius_m: float | None = None  # bend radius; none: one smooth curve, 0: sharp
+    roadside: RoadsideRules = field(default_factory=RoadsideRules)
 
 
 @dataclass(frozen=True)
@@ -114,6 +137,12 @@ _LIMITS = {
     "loop_odds": (0.0, 1.0),
     "l_corner_odds": (0.0, 1.0),
     "corner_radius_m": (0.0, 500.0),
+    "side_m": (0.0, 12.0),
+    "lift_m": (0.0, 0.5),
+    "curb_m": (0.0, 1.0),
+    "edge_light": (0.0, 0.5),
+    "wall_h_m": (0.0, 3.0),
+    "wall_w_m": (0.1, 3.0),
 }
 _OPTIONAL_RGB = {"markings"}
 _OPTIONAL_NUMBER = {"grid_heading_deg", "corner_radius_m"}
@@ -193,6 +222,9 @@ def parse_biome(data, where="biome", default_name="biome", assets_dir=None):
     if roads.jitter_m > 0.2 * roads.grid_spacing_m:
         raise ValueError(f"{where}.roads.jitter_m: {roads.jitter_m} is more than a fifth "
                          f"of grid_spacing_m ({roads.grid_spacing_m})")
+    if roads.roadside.curb_m > roads.roadside.side_m:
+        raise ValueError(f"{where}.roads.roadside.curb_m: {roads.roadside.curb_m} is wider "
+                         f"than side_m ({roads.roadside.side_m})")
     if assets_dir is not None and not (Path(assets_dir) / terrain.detail_texture).is_file():
         raise ValueError(f"{where}.terrain.detail_texture: no file assets/"
                          f"{terrain.detail_texture}")

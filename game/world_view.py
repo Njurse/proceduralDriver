@@ -3,8 +3,8 @@
 ``ChunkStreamer`` turns worldgen.chunk meshes into GeomNodes, building the
 nearest missing chunks first and dropping chunks that fall out of range.  A
 ground with a ``road_mesh(ci, ck)`` (world.world.World) gets its road strips
-added to each chunk.  The detail textures that modulate the vertex colours
-live here too.
+and ``roadside_mesh`` strips (sidewalks, verges, walls) added to each chunk.
+The detail textures that modulate the vertex colours live here too.
 """
 
 import logging
@@ -218,3 +218,11 @@ class ChunkStreamer:
         # just above the flattened ground, and drawn over it where the depth
         # buffer can't tell them apart
         road_node.setDepthOffset(1)
+        side = self.terrain.roadside_mesh(*key) if hasattr(self.terrain, "roadside_mesh") \
+            else None
+        if side is not None:
+            name = f"chunk_{key[0]}_{key[1]}_roadside"
+            side_node = self.loaded[key].attachNewNode(mesh_node(side, name))
+            if self.road_texture is not None:
+                side_node.setTexture(self.road_texture, 1)
+            side_node.setDepthOffset(1)

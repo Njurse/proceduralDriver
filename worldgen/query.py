@@ -79,6 +79,18 @@ class WorldGround(SampledGround):
         return ChunkMesh(pos=pos, normal=normal, color=color,
                          uv=uv / self.spec.roads.detail_tile_m, tris=tris)
 
+    def roadside_mesh(self, ci, ck, size=None):
+        """Roadside strips (sidewalks, kerbs, verges, walls) for chunk (ci, ck),
+        or None when its roads' biomes lay none."""
+        size = float(self.spec.chunk_size_m if size is None else size)
+        out = self.roads.roadside(self, ci * size, ck * size, (ci + 1) * size,
+                                  (ck + 1) * size, self.spec.roads.lift_m)
+        if out is None:
+            return None
+        pos, normal, color, uv, tris = out
+        return ChunkMesh(pos=pos, normal=normal, color=color,
+                         uv=uv / self.spec.roads.detail_tile_m, tris=tris)
+
     def structure_mesh(self, ci, ck):
         """The structures anchored in chunk (ci, ck) as one ChunkMesh, or None."""
         return structures_mesh(self.structures.chunk(ci, ck))

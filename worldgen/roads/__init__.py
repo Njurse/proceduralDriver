@@ -18,7 +18,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from worldgen.roads import layout, mesh
+from worldgen.roads import layout, mesh, roadside
 from worldgen.roads.layout import SUPER_M
 from worldgen.roads.mesh import MARKING_HALF_WIDTH, MARKING_LIFT
 from worldgen.roads.road import SEGMENT_M, Road, blend, blend_point, build
@@ -35,6 +35,8 @@ _GRAPHS, _CELLS = 16, 9  # super-cells kept: a 3 x 3 block and its stitch neighb
 
 _AHEAD_M = 600.0         # prefetch: super-cells a query this much farther out needs
 _LOCK = threading.Lock()  # guards the LRU caches, not the builds
+
+_ROADSIDE_PAD_M = 20.0   # junction search past the chunk for roadside strips
 
 
 def _lru(cache, key, make, limit):
@@ -196,3 +198,10 @@ class RoadNetwork:
     def strips(self, ground, x0, z0, x1, z1, lift):
         """Road strips for the box (see mesh.strips)."""
         return mesh.strips(self.roads_near(x0, z0, x1, z1), ground, x0, z0, x1, z1, lift)
+
+    def roadside(self, ground, x0, z0, x1, z1, lift):
+        """Roadside strips for the box (see roadside.strips); the roads a little
+        past it come too, so a side can stop at a junction just outside."""
+        pad = _ROADSIDE_PAD_M
+        return roadside.strips(self.roads_near(x0 - pad, z0 - pad, x1 + pad, z1 + pad),
+                               ground, x0, z0, x1, z1, lift)

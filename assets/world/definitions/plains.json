@@ -30,6 +30,7 @@
     "max_grade_pct": 7.0,
     "surface": "asphalt",
     "color": [0.30, 0.30, 0.32],
-    "flatten": true
+    "flatten": true,
+    "roadside": {"side_m": 1.5, "color": [0.48, 0.46, 0.42]}
   }
 }

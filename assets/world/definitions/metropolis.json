@@ -34,7 +34,8 @@
     "color": [0.2, 0.2, 0.22],
     "flatten": true,
     "markings": [0.95, 0.85, 0.3],
-    "loop_odds": 0.3
+    "loop_odds": 0.3,
+    "roadside": {"side_m": 4.0, "lift_m": 0.15, "curb_m": 0.35, "color": [0.5, 0.5, 0.52], "curb_color": [0.7, 0.7, 0.68], "edge_light": 0.15}
   },
   "structures": [
     {"gen": "voronoi_towers"}

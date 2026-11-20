@@ -29,7 +29,8 @@
     "max_grade_pct": 9.0,
     "surface": "packed_sand",
     "color": [0.56, 0.47, 0.35],
-    "flatten": true
+    "flatten": true,
+    "roadside": {"side_m": 2.5, "color": [0.66, 0.57, 0.43], "edge_light": 0.1}
   },
   "structures": [
     {"gen": "scatter", "kinds": ["rock", "rock", "cactus", "pole"], "spacing_m": 26.0, "odds": 0.22, "max_slope_deg": 18.0}
