@@ -404,14 +404,13 @@ class DriveSim(ShowBase):
         v = self.vehicle
         st = self.audio_state
         st.speed = v.speed  # m/s
-        st.throttle = v.throttle_input
+        st.revs = v.revs
+        st.accelerating = v.thrust != 0
         st.handbrake = v.handbrake
         st.wheelspin = v.wheelspin
-        st.wheel_speeds = [abs(w.wheel_speed) * 100.0 for w in v.wheels]  # rad/s x 100
         st.slip_lateral = max((w.slip_lateral for w in v.wheels), default=0.0)
         st.slip_longitudinal = max((w.slip_longitudinal for w in v.wheels),
                                   default=0.0)
-        st.locked = [w.locked for w in v.wheels]
         try:
             self.audio.update(dt, st)
         except Exception as exc:

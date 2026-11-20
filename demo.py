@@ -119,13 +119,12 @@ def main():
 
         # update audio state
         audio_state.speed = vehicle.speed
-        audio_state.throttle = vehicle.throttle_input
+        audio_state.revs = vehicle.revs
+        audio_state.accelerating = vehicle.thrust != 0
         audio_state.handbrake = vehicle.handbrake
         audio_state.wheelspin = vehicle.wheelspin
-        audio_state.wheel_speeds = [w.wheel_speed for w in vehicle.wheels]
-        audio_state.slip_lateral = vehicle.wheels[0].slip_lateral
-        audio_state.slip_longitudinal = vehicle.wheels[0].slip_longitudinal
-        audio_state.locked = [w.locked for w in vehicle.wheels]
+        audio_state.slip_lateral = max(w.slip_lateral for w in vehicle.wheels)
+        audio_state.slip_longitudinal = max(w.slip_longitudinal for w in vehicle.wheels)
         audio.update(dt, audio_state)
 
         # render
@@ -173,7 +172,7 @@ def main():
             f"pos=({vx:.1f},{vz:.1f}) speed={vehicle.speed:.2f} heading={math.degrees(yaw):.1f}",
             f"throttle={vehicle.throttle_input:.2f} brake={vehicle.brake_input:.2f} steer={vehicle.steer_input:.2f}",
             f"wheel_angle={vehicle.wheel_angle} handbrake={vehicle.handbrake} auto_brake={vehicle.auto_brake}",
-            f"thrust={vehicle.thrust}",
+            f"thrust={vehicle.thrust} gear={vehicle.gear} revs={vehicle.revs:.0f}",
             f"engine_vol={audio.engine_vol:.2f} idle_vol={audio.idle_vol:.2f} skid_vol={audio.skid_vol:.2f} skid={audio.skid_active}",
             f"fps={clock.get_fps():.1f}  verts={len(cos.mesh_vertices)} invert_vertical={cos.invert_vertical}",
             "W/S throttle/brake  A/D steer  LShift fast steer  Space handbrake  Esc quit",

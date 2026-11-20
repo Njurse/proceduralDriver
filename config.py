@@ -266,20 +266,12 @@ HAVANA_WHEEL_TEXTURES = (ASSETS / "vehicle" / "wheels" / "havana").as_posix()
 DRIVE_FOG_DENSITY = 0.005       # exponential fog density for the ground plane
 DRIVE_BOUNDARY_MARGIN = 12.0    # keep the car this far inside the ground quad
 
-# Wheels / audio inputs -------------------------------------------------------
+# Wheels -------------------------------------------------------------------
 # Wheel speeds are rad/s x 100 (0.327 m tyre radius): 3300 ~ 11 m/s.
 WHEEL_FAST_TEXTURE_SPEED = 3300
-REDLINE_WHEEL_SPEED = 12000     # ~39 m/s, near the car's ~41 m/s top speed
 
 # Audio (driving) -----------------------------------------------------------
-ENGINE_PITCH_MIN = 0.8
-ENGINE_PITCH_MAX = 1.5
-ENGINE_VOLUME_MIN = 0.3
-ENGINE_VOLUME_MAX = 1.0
-IDLE_ENTER_SPEED = 8.0          # m/s
-IDLE_EXIT_SPEED = 12.0          # m/s
-IDLE_THROTTLE_EPS = 0.05
-AUDIO_CROSSFADE_MS = 200
+# Engine and idle follow the gearbox revs (core/vehicle_audio.py).
 # Slip is the sideways (or locked/spinning) speed at a tyre's contact, m/s.
 # Normal hard cornering slides ~0.6 m/s; handbrake turns 0.8-1.5 m/s.
 SKID_SLIP_THRESHOLD = 1.0
@@ -288,5 +280,3 @@ SKID_VOLUME_MIN = 0.2
 SKID_VOLUME_MAX = 1.0
 SKID_FADE_OUT_MS = 200
 SKID_HB_SPEED_MIN = 4.0         # m/s
-SKID_COOLDOWN_S = 0.05
-SPEED_NOMINAL = 40.0            # m/s, about the car's top speed

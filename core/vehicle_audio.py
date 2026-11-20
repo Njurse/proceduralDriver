@@ -1,231 +1,226 @@
-"""Vehicle audio controller (decoupled from physics).
+"""Vehicle audio: engine and idle loops driven by the gearbox revs.
 
-Follows PORTING_NOTES.md section 5.  Uses pygame.mixer with reserved channels
-for engine / idle / skid.  Receives a per-frame VehicleAudioState snapshot.
+Ports the player-car half of gamesnd.c: ControlCarRevs ramps two volumes
+(revsvol, idlevol, in millibels), and the per-frame sound update sets
+
+    engine pitch = revs / 4 + revsvol / 64 + 1500   (4096 = 1.0)
+    idle pitch   = revs / 4 + 4096
+
+so the engine note follows the revs, including the dip at every upshift.
+pygame cannot change a sound's pitch, so each loop is pre-resampled into a
+small bank of pitches that all loop at once; the two bank entries around the
+wanted pitch share its volume.  Skid stays a simple slip-triggered loop.
 """
 
-import os
 import logging
+import math
+import os
+from dataclasses import dataclass
+
 try:
     import config
 except ModuleNotFoundError:
-    import sys, os
+    import sys
+
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     import config
 
 try:
+    import numpy as np
     import pygame
+
     _HAS_PYGAME = True
 except Exception:
     _HAS_PYGAME = False
 
+from core.units import C_FRAME_HZ
 
+log = logging.getLogger("vehicle_audio")
+
+SILENT_MB = -10000.0
+IDLE_REVS = 7001.0  # below this with no gas the idle loop takes over
+ENGINE_BANK = (0.35, 0.5, 0.7, 1.0, 1.4, 2.0, 2.5)  # playback-rate ratios
+IDLE_BANK = (1.0, 1.25, 1.5)
+
+
+@dataclass
 class VehicleAudioState:
-    def __init__(self):
-        self.speed = 0.0
-        self.throttle = 0.0
-        self.handbrake = 0
-        self.wheelspin = 0
-        self.wheel_speeds = [0, 0, 0, 0]
-        self.slip_lateral = 0.0
-        self.slip_longitudinal = 0.0
-        self.locked = [0, 0, 0, 0]
+    speed: float = 0.0  # m/s
+    revs: float = 0.0  # gamesnd.c units, about 0..30000
+    accelerating: bool = False  # thrust != 0, the C's "acc"
+    handbrake: int = 0
+    wheelspin: int = 0
+    slip_lateral: float = 0.0  # m/s
+    slip_longitudinal: float = 0.0
+
+
+@dataclass(frozen=True)
+class EngineVolumes:
+    revsvol: float = SILENT_MB
+    idlevol: float = -8000.0
+
+
+def step_volumes(vol: EngineVolumes, dt: float, *, revs: float, accelerating: bool,
+                 wheelspin: bool) -> EngineVolumes:
+    """ControlCarRevs' player volume ramps (millibels), per C frame x dt."""
+    k = dt * C_FRAME_HZ
+    if not accelerating and revs < IDLE_REVS:
+        idle = min(vol.idlevol + 200.0 * k, -6000.0)
+        revsvol = max(vol.revsvol - 200.0 * k, SILENT_MB)
+    else:
+        revs_max = -5500.0 if accelerating else -6750.0
+        idle = max(vol.idlevol - (256.0 if wheelspin else 64.0) * k, SILENT_MB)
+        revsvol = min(vol.revsvol + (700.0 if wheelspin else 175.0) * k, revs_max)
+    return EngineVolumes(revsvol, idle)
+
+
+def engine_pitch(revs: float, revsvol: float) -> float:
+    return (revs / 4.0 + revsvol / 64.0 + 1500.0) / 4096.0
+
+
+def idle_pitch(revs: float) -> float:
+    return (revs / 4.0 + 4096.0) / 4096.0
+
+
+def gain(millibels: float) -> float:
+    """Millibels to a linear gain, normalised so -5500 (the loudest the C
+    drives the engine) is full volume; -10000 is silence."""
+    if millibels <= SILENT_MB:
+        return 0.0
+    return min(1.0, 10.0 ** (millibels / 2000.0) * 10.0 ** (5500.0 / 2000.0))
+
+
+def bank_weights(pitch: float, bank) -> list[float]:
+    """Volume share of each bank entry: the two around ``pitch`` crossfade
+    in log-pitch; outside the bank the nearest end takes it all."""
+    w = [0.0] * len(bank)
+    if pitch <= bank[0]:
+        w[0] = 1.0
+        return w
+    if pitch >= bank[-1]:
+        w[-1] = 1.0
+        return w
+    for i in range(len(bank) - 1):
+        lo, hi = bank[i], bank[i + 1]
+        if lo <= pitch <= hi:
+            t = math.log(pitch / lo) / math.log(hi / lo)
+            w[i], w[i + 1] = 1.0 - t, t
+            return w
+    return w
+
+
+def _resample(snd, ratio):
+    arr = pygame.sndarray.array(snd)
+    n = arr.shape[0]
+    m = max(2, int(n / ratio))
+    x = np.linspace(0.0, n - 1, m)
+    src = np.arange(n)
+    if arr.ndim == 1:
+        out = np.interp(x, src, arr)
+    else:
+        out = np.stack([np.interp(x, src, arr[:, c]) for c in range(arr.shape[1])], axis=1)
+    return pygame.sndarray.make_sound(np.ascontiguousarray(out.astype(arr.dtype)))
+
+
+class _Voice:
+    """One looped sound played at several pitches on its own channels."""
+
+    def __init__(self, path, bank, first_channel):
+        self.bank = bank
+        self.channels = []
+        if not path or not os.path.exists(path):
+            log.warning("[audio] sound missing: %s", path)
+            return
+        base = pygame.mixer.Sound(path)
+        for i, ratio in enumerate(bank):
+            ch = pygame.mixer.Channel(first_channel + i)
+            snd = base if ratio == 1.0 else _resample(base, ratio)
+            ch.play(snd, loops=-1)
+            ch.set_volume(0.0)
+            self.channels.append(ch)
+
+    def set(self, pitch, volume):
+        for ch, w in zip(self.channels, bank_weights(pitch, self.bank), strict=False):
+            ch.set_volume(volume * w)
+
+    def stop(self):
+        for ch in self.channels:
+            ch.stop()
 
 
 class AudioManager:
     def __init__(self, cosmetics, muted=False):
         self.cos = cosmetics
         self.muted = muted
-        self.engine_ch = None
-        self.idle_ch = None
-        self.skid_ch = None
-        self.engine_snd = None
-        self.idle_snd = None
-        self.skid_snd = None
+        self.volumes = EngineVolumes()
         self.engine_vol = 0.0
         self.idle_vol = 0.0
         self.skid_vol = 0.0
         self.skid_active = False
-        self.skid_cooldown = 0.0
-        self.engine_load_factor = 0.0
-        self._init_mixer()
+        self.engine = self.idle = None
+        self.skid_ch = self.skid_snd = None
+        if _HAS_PYGAME:
+            self._init_mixer()
 
     def _init_mixer(self):
-        log = logging.getLogger("vehicle_audio")
-        if not _HAS_PYGAME:
-            log.warning("[audio] pygame is unavailable; vehicle audio disabled")
+        try:
+            pygame.mixer.init(frequency=22050, size=-16, channels=2)
+            pygame.mixer.set_num_channels(len(ENGINE_BANK) + len(IDLE_BANK) + 2)
+        except Exception as exc:
+            log.warning("[audio] mixer unavailable; vehicle audio disabled: %s", exc)
             return
-        try:
-            pygame.mixer.init(frequency=22050, size=-16, channels=3)
-        except Exception as exc:
-            log.warning("[audio] mixer init failed (%s); trying defaults", exc)
-            try:
-                pygame.mixer.init()
-            except Exception as exc2:
-                log.warning("[audio] mixer unavailable; vehicle audio disabled: %s",
-                            exc2)
-                return
-        try:
-            pygame.mixer.set_num_channels(8)
-        except Exception as exc:
-            log.debug("[audio] set_num_channels failed: %s", exc)
-        self.engine_ch = pygame.mixer.Channel(0)
-        self.idle_ch = pygame.mixer.Channel(1)
-        self.skid_ch = pygame.mixer.Channel(2)
-
         snds = self.cos.sounds
-        log.debug("[audio] sound paths: %s", snds)
-        for key, attr in (("engine", "engine_snd"), ("idle", "idle_snd"),
-                          ("skid", "skid_snd")):
-            path = snds.get(key, "")
-            if not path or not os.path.exists(path):
-                log.warning("[audio] %s sound missing: %s", key, path)
-                continue
-            try:
-                snd = pygame.mixer.Sound(path)
-                snd.set_volume(0.0)
-                setattr(self, attr, snd)
-            except Exception as exc:
-                log.warning("[audio] failed to load %s sound %s: %s",
-                            key, path, exc)
-
-        # start loops at zero volume
-        if self.engine_snd is not None:
-            self.engine_ch.play(self.engine_snd, loops=-1)
-            self.engine_ch.set_volume(0.0)
-        if self.idle_snd is not None:
-            self.idle_ch.play(self.idle_snd, loops=-1)
-            self.idle_ch.set_volume(0.0)
-        if self.skid_snd is not None:
-            self.skid_ch.play(self.skid_snd, loops=-1)
-            self.skid_ch.set_volume(0.0)
-
-        log = logging.getLogger("vehicle_audio")
-        log.info("[audio] engine=%s idle=%s skid=%s",
-                 self.engine_snd is not None, self.idle_snd is not None,
-                 self.skid_snd is not None)
-
-    def _clamp(self, v, lo, hi):
-        return max(lo, min(hi, v))
+        try:
+            self.engine = _Voice(snds.get("engine", ""), ENGINE_BANK, 0)
+            self.idle = _Voice(snds.get("idle", ""), IDLE_BANK, len(ENGINE_BANK))
+            path = snds.get("skid", "")
+            if path and os.path.exists(path):
+                self.skid_snd = pygame.mixer.Sound(path)
+                self.skid_ch = pygame.mixer.Channel(len(ENGINE_BANK) + len(IDLE_BANK))
+                self.skid_ch.play(self.skid_snd, loops=-1)
+                self.skid_ch.set_volume(0.0)
+        except Exception as exc:
+            log.warning("[audio] failed to load sounds: %s", exc)
 
     def update(self, dt, state: VehicleAudioState):
-        if not _HAS_PYGAME:
-            return
-        # RPM proxy
-        ws = [abs(x) for x in state.wheel_speeds]
-        redline = getattr(config, "REDLINE_WHEEL_SPEED", 3300)
-        rpm_proxy = self._clamp((max(ws) if ws else 0) / max(1.0, redline), 0.0, 1.0)
+        self.volumes = step_volumes(self.volumes, dt, revs=state.revs,
+                                    accelerating=state.accelerating,
+                                    wheelspin=bool(state.wheelspin))
+        master = 0.0 if self.muted else 1.0
+        self.engine_vol = gain(self.volumes.revsvol)
+        self.idle_vol = gain(self.volumes.idlevol)
+        if self.engine is not None:
+            self.engine.set(engine_pitch(state.revs, self.volumes.revsvol),
+                            self.engine_vol * master)
+        if self.idle is not None:
+            self.idle.set(idle_pitch(state.revs), self.idle_vol * master)
+        self._update_skid(dt, state)
+        if self.skid_ch is not None:
+            self.skid_ch.set_volume(self.skid_vol * master)
 
-        throttle = self._clamp(state.throttle, 0.0, 1.0)
-        engine_load = throttle
-        engine_speed_factor = rpm_proxy * engine_load
-
-        speed_nominal = getattr(config, "SPEED_NOMINAL", 120.0)
-        speed_factor_norm = self._clamp(abs(state.speed) / max(1.0, speed_nominal), 0.0, 1.0)
-        engine_load_factor = self._clamp(throttle * speed_factor_norm, 0.0, 1.0)
-
-        # engine pitch/volume
-        pmin = getattr(config, "ENGINE_PITCH_MIN", 0.8)
-        pmax = getattr(config, "ENGINE_PITCH_MAX", 1.5)
-        vmin = getattr(config, "ENGINE_VOLUME_MIN", 0.3)
-        vmax = getattr(config, "ENGINE_VOLUME_MAX", 1.0)
-        engine_pitch = pmin + (pmax - pmin) * engine_speed_factor
-        engine_vol_target = vmin + (vmax - vmin) * engine_load_factor
-
-        # idle conditions
-        idle_enter_speed = getattr(config, "IDLE_ENTER_SPEED", 8.0)
-        idle_exit_speed = getattr(config, "IDLE_EXIT_SPEED", 12.0)
-        idle_thr_eps = getattr(config, "IDLE_THROTTLE_EPS", 0.05)
-
-        # crossfade engine <-> idle
-        if (abs(state.speed) < idle_enter_speed and throttle < idle_thr_eps
-                and state.handbrake == 0 and state.wheelspin == 0):
-            # fade to idle
-            self.idle_vol = min(1.0, self.idle_vol + dt * 5.0)
-            self.engine_vol = max(0.0, self.engine_vol - dt * 5.0)
-        elif (abs(state.speed) > idle_exit_speed or throttle > 0.1):
-            self.idle_vol = max(0.0, self.idle_vol - dt * 5.0)
-            self.engine_vol = min(1.0, self.engine_vol + dt * 5.0)
-        else:
-            # hold
-            pass
-
-        # blend targets
-        self.engine_vol = self.engine_vol * 0.9 + engine_vol_target * 0.1 * (1.0 - self.idle_vol)
-        self.engine_vol = self._clamp(self.engine_vol, 0.0, 1.0)
-
-        # apply engine pitch via... pygame Sound doesn't support pitch natively.
-        # We approximate by volume only; pitch would need resampling (out of scope).
-        if self.engine_ch is not None and self.engine_snd is not None:
-            self.engine_ch.set_volume(self.engine_vol * (0.0 if self.muted else 1.0))
-        if self.idle_ch is not None and self.idle_snd is not None:
-            self.idle_ch.set_volume(self.idle_vol * (0.0 if self.muted else 1.0))
-
-        # skid
-        skid_thr = getattr(config, "SKID_SLIP_THRESHOLD", 0.4)
-        skid_release = getattr(config, "SKID_SLIP_RELEASE", 0.2)
-        skid_hb_min = getattr(config, "SKID_HB_SPEED_MIN", 4.0)
-        skid_cooldown = getattr(config, "SKID_COOLDOWN_S", 0.05)
-
-        slip_mag = max(abs(state.slip_lateral), abs(state.slip_longitudinal))
-        trigger = False
-        if slip_mag > skid_thr:
-            trigger = True
-        if state.wheelspin == 1 and throttle > 0.3:
-            trigger = True
-        if state.handbrake == 1 and abs(state.speed) > skid_hb_min:
-            trigger = True
-        if abs(state.slip_longitudinal) > getattr(config, "SKID_LON_THRESHOLD", 0.5) if hasattr(config, "SKID_LON_THRESHOLD") else 0.5:
-            trigger = True
-
-        self.skid_cooldown = max(0.0, self.skid_cooldown - dt)
-
-        if trigger and not self.skid_active and self.skid_cooldown <= 0:
+    def _update_skid(self, dt, state):
+        slip = max(abs(state.slip_lateral), abs(state.slip_longitudinal))
+        threshold = config.SKID_SLIP_THRESHOLD
+        trigger = (slip > threshold
+                   or (state.handbrake and abs(state.speed) > config.SKID_HB_SPEED_MIN))
+        if trigger:
             self.skid_active = True
-            self.skid_cooldown = skid_cooldown
-        if not trigger and slip_mag < skid_release:
+        elif slip < config.SKID_SLIP_RELEASE:
             self.skid_active = False
-
         if self.skid_active:
-            vol_min = getattr(config, "SKID_VOLUME_MIN", 0.2)
-            vol_max = getattr(config, "SKID_VOLUME_MAX", 1.0)
-            slip_norm = self._clamp(slip_mag / max(0.01, skid_thr), 0.0, 1.0)
-            self.skid_vol = vol_min + (vol_max - vol_min) * slip_norm
+            lo, hi = config.SKID_VOLUME_MIN, config.SKID_VOLUME_MAX
+            self.skid_vol = lo + (hi - lo) * min(slip / threshold, 1.0)
         else:
-            fade_ms = getattr(config, "SKID_FADE_OUT_MS", 200) / 1000.0
-            self.skid_vol = max(0.0, self.skid_vol - dt / max(0.01, fade_ms))
-
-        if self.skid_ch is not None and self.skid_snd is not None:
-            self.skid_ch.set_volume(self.skid_vol * (0.0 if self.muted else 1.0))
-
-        self.engine_load_factor = engine_load_factor
-        self.rpm_proxy = rpm_proxy
+            fade = config.SKID_FADE_OUT_MS / 1000.0
+            self.skid_vol = max(0.0, self.skid_vol - dt / fade)
 
     def shutdown(self):
         if not _HAS_PYGAME:
             return
-        for ch in (self.engine_ch, self.idle_ch, self.skid_ch):
-            try:
-                if ch is not None:
-                    ch.stop()
-            except Exception:
-                pass
+        for voice in (self.engine, self.idle):
+            if voice is not None:
+                voice.stop()
         try:
             pygame.mixer.quit()
-        except Exception:
-            pass
-
-
-if __name__ == "__main__":
-    from core.car_profile import load_cosmetics
-    cos = load_cosmetics()
-    am = AudioManager(cos)
-    st = VehicleAudioState()
-    st.speed = 50.0
-    st.throttle = 0.7
-    st.wheel_speeds = [3000, 2900, 3100, 2800]
-    st.slip_lateral = 0.5
-    am.update(1 / 60.0, st)
-    print("engine_vol", round(am.engine_vol, 3), "idle_vol", round(am.idle_vol, 3),
-          "skid_vol", round(am.skid_vol, 3), "skid_active", am.skid_active)
-    am.shutdown()
+        except Exception as exc:
+            log.debug("[audio] mixer quit failed: %s", exc)
