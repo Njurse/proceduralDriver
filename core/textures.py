@@ -5,7 +5,7 @@ bottom-up, so :func:`_to_texture` swizzles and flips every array once.
 """
 
 import numpy as np
-from panda3d.core import Texture
+from panda3d.core import Filename, PNMImage, Texture
 
 from core.noise import fbm_2d
 
@@ -56,3 +56,18 @@ def seamless_fbm(width, height, frequency, seed, octaves=5):
                    seed, octaves)
     return left * (1.0 - grid_u) + right * grid_u
 
+
+def load_color_keyed(path, name, key=(255, 255, 255)):
+    """Load an image as a texture, making ``key``-coloured pixels transparent.
+
+    The Driver 2 wheel PNGs have no alpha: the round wheel sits on a white
+    square that the PlayStation drew as its transparent colour.
+    """
+    img = PNMImage(Filename.fromOsSpecific(str(path)))
+    w, h = img.getXSize(), img.getYSize()
+    rgb = np.array([[img.getXelVal(x, y) for x in range(w)] for y in range(h)],
+                   dtype=np.int64)
+    rgb = rgb * 255 // max(img.getMaxval(), 1)
+    alpha = np.where(np.all(rgb == np.array(key), axis=-1), 0, 255)
+    rgba = np.concatenate([rgb, alpha[..., None]], axis=-1).astype(np.uint8)
+    return _to_texture(rgba, name)

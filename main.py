@@ -26,9 +26,16 @@ from panda3d.core import (
     DirectionalLight,
     Filename,
     Fog,
+    Geom,
+    GeomNode,
+    GeomTriangles,
+    GeomVertexData,
+    GeomVertexFormat,
+    GeomVertexWriter,
     Mat4,
     NodePath,
     TransparencyAttrib,
+    Vec3,
     Vec4,
     getModelPath,
     loadPrcFileData,
@@ -39,7 +46,7 @@ from core.car_profile import load_cosmetics
 from core.gamepad import Gamepad
 from core.orbit_camera import OrbitCamera, orbit_offset
 from core.redriver2_physics import Input, PhysicsWorld, Vehicle
-from core.textures import _to_texture, seamless_fbm
+from core.textures import _to_texture, load_color_keyed, seamless_fbm
 from core.vehicle_audio import AudioManager, sound_input
 from world.chunks import ChunkStreamer, detail_texture
 from world.terrain import Terrain
@@ -50,6 +57,8 @@ log = logging.getLogger("main")
 SHOTS = (("world_chase", 0.0), ("world_left_side", -90.0), ("world_right_side", 90.0),
          ("world_front_looking_back", 180.0))
 CAM_TERRAIN_CLEARANCE = 0.6  # keep the chase camera this far above the hills
+TYRE_WIDTH_M = 0.14          # gap between a wheel's outer and inner planes
+TYRE_BAND_RADIUS = 0.94      # tread diamond corners, fraction of the wheel radius
 
 # Physics frame (x, y up, z forward) -> Panda3D (x, y forward, z up).  This
 # swap is a reflection; the C physics frame is itself mirrored relative to
@@ -63,6 +72,31 @@ def _mat4(a, t=(0.0, 0.0, 0.0)):
                 a[0, 1], a[1, 1], a[2, 1], 0.0,
                 a[0, 2], a[1, 2], a[2, 2], 0.0,
                 t[0], t[1], t[2], 1.0)
+
+
+def _tyre_band(radius, width):
+    """Black tread: a diamond (square on its corner) of four quads round the
+    axle (x), from the outer plane at x = 0 to the inner one at x = width."""
+    vdata = GeomVertexData("tyre", GeomVertexFormat.getV3n3(), Geom.UH_static)
+    vertex = GeomVertexWriter(vdata, "vertex")
+    normal = GeomVertexWriter(vdata, "normal")
+    corners = [(radius * math.cos(a), radius * math.sin(a))
+               for a in (0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi)]
+    prim = GeomTriangles(Geom.UH_static)
+    for k in range(4):
+        (y0, z0), (y1, z1) = corners[k], corners[(k + 1) % 4]
+        ny, nz = (y0 + y1) / 2.0, (z0 + z1) / 2.0
+        length = math.hypot(ny, nz)
+        for x, y, z in ((0.0, y0, z0), (0.0, y1, z1), (width, y1, z1), (width, y0, z0)):
+            vertex.addData3(x, y, z)
+            normal.addData3(0.0, ny / length, nz / length)
+        prim.addVertices(4 * k, 4 * k + 1, 4 * k + 2)
+        prim.addVertices(4 * k, 4 * k + 2, 4 * k + 3)
+    geom = Geom(vdata)
+    geom.addPrimitive(prim)
+    node = GeomNode("tyre_band")
+    node.addGeom(geom)
+    return node
 
 
 def _rot_x(a):
@@ -199,43 +233,39 @@ class DriveSim(ShowBase):
                         rel)
             self.car.setTexture(self._grey_texture(), 1)
 
-        # Wheel discs, placed every frame where cars.c DrawCarWheels draws them.
+        # Wheels, placed every frame where cars.c DrawCarWheels draws them: an
+        # outer and an inner textured plane facing the same way (the texture's
+        # white background keyed out), joined by a black diamond tread band.
         self.wheel_nodes = []
-        self.wheel_spin = 0.0
         wheel_tex = None
-        try:
-            wheel_tex_path = self.cos.wheel_textures.get("clean")
-        except Exception:
-            wheel_tex_path = None
-        if wheel_tex_path:
-            try:
-                load_path = wheel_tex_path
-                with contextlib.suppress(ValueError):
-                    load_path = os.path.relpath(wheel_tex_path, config.ROOT)
-                wheel_tex = self.loader.loadTexture(load_path)
-            except Exception as exc:
-                log.debug("[car] wheel texture load failed: %s", exc)
-                wheel_tex = None
-        diameter = 2.0 * self.vehicle.geo.wheel_radius
-        # card local x/z span the disc, its normal (y) lies along the axle (x)
+        wheel_tex_path = self.cos.wheel_textures.get("clean")
+        if wheel_tex_path and os.path.exists(wheel_tex_path):
+            wheel_tex = load_color_keyed(wheel_tex_path, "wheel_clean")
+        else:
+            log.warning("[car] wheel texture missing: %s", wheel_tex_path)
+        radius = self.vehicle.geo.wheel_radius
+        # card local x/z span the plane, its normal (y) lies along the axle (x)
         disc_mat = np.array([[0.0, 1.0, 0.0],
-                             [diameter, 0.0, 0.0],
-                             [0.0, 0.0, diameter]])
+                             [2.0 * radius, 0.0, 0.0],
+                             [0.0, 0.0, 2.0 * radius]])
         self.wheel_mounts = []
-        for _ in range(4):
+        for i in range(4):
             mount = self.car_body.attachNewNode("wheel")
             spinner = mount.attachNewNode("spinner")
-            try:
-                cm = CardMaker("wheeldisc")
+            inboard = -math.copysign(TYRE_WIDTH_M, self.vehicle.wheel_visual_offset(i)[0])
+            for name, x in (("outer", 0.0), ("inner", inboard)):
+                cm = CardMaker(f"wheel_{name}")
                 cm.setFrame(-0.5, 0.5, -0.5, 0.5)
-                disc = spinner.attachNewNode(cm.generate())
-                disc.setMat(_mat4(disc_mat))
+                plane = spinner.attachNewNode(cm.generate())
+                plane.setMat(_mat4(disc_mat, (x, 0.0, 0.0)))
                 if wheel_tex is not None:
-                    disc.setTexture(wheel_tex, 1)
-                disc.setTwoSided(True)
-                disc.setTransparency(TransparencyAttrib.MBinary)
-            except Exception as exc:
-                log.debug("[car] wheel disc build failed: %s", exc)
+                    plane.setTexture(wheel_tex, 1)
+                plane.setTwoSided(True)
+                plane.setTransparency(TransparencyAttrib.MBinary)
+            band = spinner.attachNewNode(_tyre_band(radius * TYRE_BAND_RADIUS, inboard))
+            band.setTwoSided(True)
+            band.setTextureOff(1)
+            band.setColor(0.04, 0.04, 0.04, 1.0, 1)
             self.wheel_mounts.append(mount)
             self.wheel_nodes.append(spinner)
         self.wheel_spins = [0.0] * 4
@@ -464,6 +494,16 @@ def take_shots(game, out_dir):
     game.fog.setExpDensity(config.DRIVE_FOG_DENSITY * 0.15)
     _save_shot(game, os.path.join(out_dir, "world_hills.png"))
     game.fog.setExpDensity(config.DRIVE_FOG_DENSITY)
+
+    # close-up of the front wheel, from outside and a little ahead of it
+    wheel = game.wheel_mounts[0].getPos(game.render)
+    side = math.copysign(1.0, game.vehicle.wheel_visual_offset(0)[0])
+    right = game.render.getRelativeVector(game.car_body, Vec3(side, 0, 0))
+    ahead = game.render.getRelativeVector(game.car_body, Vec3(0, 0, 1))
+    up = Vec3(0, 0, 1)
+    game.camera.setPos(wheel + right * 1.3 + ahead * 0.9 + up * 0.25)
+    game.camera.lookAt(wheel)
+    _save_shot(game, os.path.join(out_dir, "world_wheel_closeup.png"))
 
 
 def main():
