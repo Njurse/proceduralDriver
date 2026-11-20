@@ -1,5 +1,9 @@
-"""Road strips for a chunk: mitred quads per segment plus dashed centre
+"""Road strips for a chunk: a quad per segment, a round fan on the outside
+of each bend (the flattened ground is round there too, so a sharp corner
+neither narrows nor lets the shoulder poke through), plus dashed centre
 markings, as numpy arrays (world.chunks turns them into Panda3D geometry)."""
+
+import math
 
 import numpy as np
 
@@ -21,19 +25,14 @@ def strips(roads, ground, x0, z0, x1, z1, lift):
             continue
         seg  = np.diff(r.pts, axis=0)
         seg /= np.linalg.norm(seg, axis=1, keepdims=True)
-        tan  = np.concatenate([seg[:1], seg[:-1] + seg[1:], seg[-1:]])
-        tan /= np.linalg.norm(tan, axis=1, keepdims=True)
-        # mitre: keep the full width through a bend, up to a sharp 90-120 deg corner
-        mitre = 1.0 / np.maximum(np.einsum("ij,ij->i", tan, np.concatenate([seg, seg[-1:]])),
-                                 0.5)
-        side = np.stack([-tan[:, 1], tan[:, 0]], axis=1) * (r.half_width * mitre)[:, None]
+        side = np.stack([-seg[:, 1], seg[:, 0]], axis=1) * r.half_width   # per segment
         s    = np.concatenate([[0.0], np.cumsum(np.hypot(r.dx, r.dz))])
         for k in sel:
             base = sum(len(p) for p in pos)
             quad = []
             for p in (k, k + 1):
                 for f in (-1.0, 0.0, 1.0):
-                    quad.append((*(r.pts[p] + f * side[p]), f, s[p]))
+                    quad.append((*(r.pts[p] + f * side[k]), f, s[p]))
             quad = np.array(quad)
             pos.append(quad[:, :2])
             lifts.extend([0.0] * 6)
@@ -47,7 +46,7 @@ def strips(roads, ground, x0, z0, x1, z1, lift):
             if r.markings is not None and k % 2 == 0:
                 f    = MARKING_HALF_WIDTH / r.half_width
                 dash = np.array([
-                    (*(r.pts[p] + g * f * side[p]), 0.0, s[p])
+                    (*(r.pts[p] + g * f * side[k]), 0.0, s[p])
                     for p in (k, k + 1) for g in (-1.0, 1.0)])
                 pos.append(dash[:, :2])
                 lifts.extend([MARKING_LIFT] * 4)
@@ -55,6 +54,8 @@ def strips(roads, ground, x0, z0, x1, z1, lift):
                     [np.tile(r.markings, (4, 1)), np.ones((4, 1))], axis=1))
                 uv.append(dash[:, [2, 3]])
                 tris.append(base + 6 + np.array([[0, 1, 2], [1, 3, 2]]))
+            if k + 1 < len(seg):
+                _bend(r, k, side, s, pos, col, uv, tris, lifts)
     if not pos:
         return None
     xz  = np.concatenate(pos)
@@ -69,3 +70,27 @@ def strips(roads, ground, x0, z0, x1, z1, lift):
            - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0]))
     tris = np.where((cross < 0.0)[:, None], tris[:, [0, 2, 1]], tris)
     return p3, n, np.concatenate(col), np.concatenate(uv), tris
+
+
+
+def _bend(r, k, side, s, pos, col, uv, tris, lifts):
+    """Fan on the outside of the bend at r.pts[k + 1], between the side
+    edges of segments k and k + 1 (nothing on a straight)."""
+    a, b = side[k], side[k + 1]
+    turn = math.atan2(a[0] * b[1] - a[1] * b[0], a @ b)
+    if abs(turn) < 0.01:
+        return
+    f = -1.0 if turn > 0.0 else 1.0          # the outside edge
+    c = r.pts[k + 1]
+    n = max(1, math.ceil(abs(turn) / math.radians(15.0)))
+    base = sum(len(p) for p in pos)
+    ang = math.atan2(a[1], a[0]) + np.linspace(0.0, turn, n + 1)
+    rim = np.stack([np.cos(ang), np.sin(ang)], axis=1) * f * r.half_width
+    pos.append(np.concatenate([c[None, :], c + rim]))
+    lifts.extend([0.0] * (n + 2))
+    shade = np.concatenate([[1.0], np.full(n + 1, 0.88)])[:, None]
+    col.append(np.concatenate([np.array(r.color) * shade, np.ones((n + 2, 1))], axis=1))
+    uv.append(np.stack([np.concatenate([[r.half_width], np.full(n + 1, (f + 1.0) * r.half_width)]),
+                        np.full(n + 2, s[k + 1])], axis=1))
+    tris.append(base + np.stack([np.zeros(n, int), np.arange(1, n + 1), np.arange(2, n + 2)],
+                                axis=1))
