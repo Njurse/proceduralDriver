@@ -37,9 +37,9 @@ config.py        paths and tuning (terrain, camera, gearbox, audio)
 worldgen/        the world generator, numpy only (no Panda3D, no config): spec (WorldSpec),
                  hashing, biomes, height, regions, palette, ground (the Ground protocol
                  the physics queries), roads/ (layout, road, mesh, lanes), chunk (meshes),
-                 query (WorldGround: height, slope, surface, road strips)
-world/           the game's world: spec.py (WorldSpec from config), world.py (World:
-                 autopilot, spawn), traffic.py, session, save, sky, worldmap
+                 query (WorldGround: height, slope, surface, road strips), traffic
+world/           the game's world: spec.py (WorldSpec and TrafficSpec from config),
+                 world.py (World: autopilot, spawn), session, save, sky, worldmap
 core/            physics (redriver2_physics, car_forces, engine, fixedpoint, quat),
                  audio (engine_sound, vehicle_audio), camera, gamepad + xinput, textures
 ui/              pause menu, minimap
@@ -48,9 +48,11 @@ tools/           dr2_fixed_emu.py: integer emulator of the C handling
 assets/          Havana car model, wheels, handling.json and sounds
 ```
 
-World knobs live in `config.py` (`TERRAIN_SEED`, chunk size, view radius,
-region and road settings) and reach `worldgen` only through the `WorldSpec`
-that `world/spec.py` builds; terrain shape comes from the biome files.
+World knobs live in `config.py` (`TERRAIN_SEED` as the default seed, chunk
+size and resolution, view radius, region, road and traffic settings) and
+reach `worldgen` only through the `WorldSpec` and `TrafficSpec` that
+`world/spec.py` builds; terrain shape comes from the biome files.  `worldgen`
+never reads `config.py`, so it can be lifted into another engine as it is.
 
 ## Roads and traffic
 

@@ -1,4 +1,4 @@
-"""Draws world.traffic: instances of the player's car model, tinted."""
+"""Draws worldgen.traffic: instances of the player's car model, tinted."""
 
 import logging
 

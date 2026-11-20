@@ -1,4 +1,4 @@
-"""Lane paths over the road network, for traffic (world.traffic).
+"""Lane paths over the road network, for traffic (worldgen.traffic).
 
 Every Road carries two lanes, one each way, driven on the right: the road's
 centre line pushed LANE_SHARE x the half width to the right (mitred through
