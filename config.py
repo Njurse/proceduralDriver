@@ -36,7 +36,7 @@ DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far pla
 
 # Biomes, regions and roads (world/biomes.py, world/regions.py, world/roads.py)
 WORLD_BIOMES = ("plains", "desert", "canyon", "coastal_beach", "jungle", "treacherous",
-                "village")      # assets/world/definitions/<name>.json
+                "village", "metropolis", "british_town")  # assets/world/definitions/<name>.json
 REGION_SCALE_M = 900.0          # spacing of the region sites that splotch the biomes
 REGION_JITTER = 0.35            # site shift, as a fraction of the spacing
 REGION_BAND_M = 240.0           # width of the blend between neighbouring regions

@@ -401,3 +401,19 @@ def test_l_corners_sharp_or_rounded_and_drivable(radius):
             assert w.query(*px)[3]
         s = w.road_mesh(*(math.floor(c / config.TERRAIN_CHUNK_SIZE) for c in r.pts[k]))
         assert s is not None and np.isfinite(s.pos).all()
+
+
+def test_large_biomes_make_larger_regions(world):
+    """metropolis (region_size 4) regions run far wider than one-site regions."""
+    xs = np.arange(-12000.0, 12000.0, 50.0)
+    owner = world.biome_index(*np.meshgrid(xs, np.arange(-12000.0, 12000.0, 1500.0)))
+    names = [b.name for b in world.biomes]
+    runs = {}
+    for row in owner:
+        edges = np.flatnonzero(np.diff(row)) + 1
+        for seg in np.split(row, edges)[1:-1]:      # whole runs only
+            runs.setdefault(names[seg[0]], []).append(len(seg) * 50.0)
+    big = np.mean(runs["metropolis"])
+    small = np.mean([r for n, rs in runs.items() if n != "metropolis" for r in rs])
+    assert world.biomes[names.index("metropolis")].region_size == 4
+    assert big > 2.0 * small, (big, small)

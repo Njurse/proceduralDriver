@@ -9,6 +9,8 @@ below:
 ``roads``    the roads the biome grows (world.roads), with
              optional dashed centre ``markings``
 ``weight``   (top level) how often world.regions picks the biome for a region
+``region_size`` (top level) the biome claims blocks of this many x this many
+             region sites, so 3 makes regions about three times as wide
 
 A bad value or an unknown key inside those sections raises ValueError naming
 the file and the key, since a typo would otherwise fall back to the default
@@ -86,6 +88,7 @@ class Biome:
     roads: RoadRules
     extra: dict                      # every other top-level field, as read
     weight: float = 1.0              # relative odds of the biome per region
+    region_size: int = 1             # regions span this many sites each way
 
 
 _LIMITS = {
@@ -106,6 +109,7 @@ _LIMITS = {
     "terrace_steps": (2, 24),
     "terrace_ramp": (0.1, 0.9),
     "weight": (0.0, 100.0),
+    "region_size": (1, 6),
     "grid": (0.0, 1.0),
     "grid_heading_deg": (-360.0, 360.0),
     "loop_odds": (0.0, 1.0),
@@ -193,8 +197,11 @@ def parse_biome(data, where="biome", default_name="biome"):
         raise ValueError(f"{where}.terrain.detail_texture: no file assets/"
                          f"{terrain.detail_texture}")
     weight = _value(where, "weight", data.get("weight", 1.0), 1.0)
-    extra = {k: v for k, v in data.items() if k not in ("name", "terrain", "roads", "weight")}
-    return Biome(name=name, terrain=terrain, roads=roads, extra=extra, weight=weight)
+    size = _value(where, "region_size", data.get("region_size", 1), 1)
+    extra = {k: v for k, v in data.items()
+             if k not in ("name", "terrain", "roads", "weight", "region_size")}
+    return Biome(name=name, terrain=terrain, roads=roads, extra=extra, weight=weight,
+                 region_size=size)
 
 
 def load_biome(name):

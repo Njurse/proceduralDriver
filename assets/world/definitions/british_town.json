@@ -1,0 +1,40 @@
+{
+  "name": "british_town",
+  "description": "British town: green rolling ground and a tangle of narrow, winding streets and crescents.",
+  "weight": 0.8,
+  "region_size": 2,
+  "terrain": {
+    "noise_scale_m": 220.0,
+    "amplitude_m": 6.0,
+    "octaves": 3,
+    "persistence": 0.35,
+    "lacunarity": 2.0,
+    "base_height_m": 1.0,
+    "steep_slope_deg": 10.0,
+    "noise_type": "fbm",
+    "colors": {
+      "low": [0.24, 0.38, 0.18],
+      "mid": [0.33, 0.47, 0.22],
+      "high": [0.45, 0.53, 0.3],
+      "steep": [0.42, 0.36, 0.28]
+    },
+    "detail_texture": "world/landscape/ground_texture_noise.png",
+    "detail_tile_m": 8.0
+  },
+  "roads": {
+    "grid": 0.0,
+    "grid_spacing_m": 125.0,
+    "jitter_m": 20.0,
+    "curviness_m": 45.0,
+    "width_m": 7.0,
+    "shoulder_m": 5.0,
+    "max_grade_pct": 9.0,
+    "surface": "asphalt",
+    "color": [0.27, 0.27, 0.29],
+    "flatten": true,
+    "markings": [0.95, 0.95, 0.92],
+    "loop_odds": 0.5,
+    "l_corner_odds": 0.2,
+    "corner_radius_m": 20.0
+  }
+}

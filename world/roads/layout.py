@@ -32,7 +32,7 @@ import config
 from world.regions import _hash01 as _hash_arr
 
 SUPER_M = 4096.0
-PITCH_M = 128.0          # candidate lattice: also the closest two junctions get
+PITCH_M = 102.4          # candidate lattice: also the closest two junctions get
 LINK_RANGE = 1.6         # candidate edges reach this many local spacings
 GRADE_COST = 8.0
 BORDER_RUN_M = 1024.0
