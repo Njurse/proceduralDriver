@@ -46,8 +46,6 @@ from core.vehicle_audio import AudioManager, sound_input
 log = logging.getLogger("drive")
 
 WORLD_SIZE = 400.0
-CAM_DIST = 10.0
-CAM_HEIGHT = 3.6
 # --shots: (file name, orbit angle in degrees) after a short run-up
 SHOTS = (("chase", 0.0), ("left_side", -90.0), ("right_side", 90.0),
          ("front_looking_back", 180.0))
@@ -82,6 +80,7 @@ class DriveSim(ShowBase):
         ShowBase.__init__(self,
                           windowType=options.get("window_type", "onscreen"))
         self.disableMouse()
+        self.camLens.setFov(config.CHASE_CAM_FOV)
         self.clock = ClockObject.getGlobalClock()
 
         self.cos = load_cosmetics()
@@ -419,13 +418,17 @@ class DriveSim(ShowBase):
     def _update_chase_cam(self, dt):
         v = self.vehicle
         h = v.heading
-        ox, oy, oz = orbit_offset(self._orbit_angle(dt), CAM_DIST, CAM_HEIGHT)
+        angle = self._orbit_angle(dt)
+        ox, oy, oz = orbit_offset(angle, config.CHASE_CAM_DIST, config.CHASE_CAM_HEIGHT)
         # car yaw frame -> physics world: right (cos h, 0, -sin h), fwd (sin h, 0, cos h)
         offset = np.array([ox * math.cos(h) + oz * math.sin(h), oy,
                            -ox * math.sin(h) + oz * math.cos(h)])
         self.camera.setPos(*(PHYS_TO_PANDA @ (v.pos + offset)))
-        px, py, pz = PHYS_TO_PANDA @ v.pos
-        self.camera.lookAt(px, py, pz + 0.8)
+        # aim ahead of the car in the chase view, at the car from the side/front
+        ahead = config.CHASE_CAM_LOOK_AHEAD * max(0.0, math.cos(angle))
+        aim = v.pos + np.array([math.sin(h) * ahead, config.CHASE_CAM_LOOK_HEIGHT,
+                                math.cos(h) * ahead])
+        self.camera.lookAt(*(PHYS_TO_PANDA @ aim))
 
     def _update_hud(self):
         v = self.vehicle
@@ -464,7 +467,7 @@ def take_shots(game, out_dir):
             game.taskMgr.step()
 
     game.key_throttle = True
-    run(150)  # 2.5 s of gas, ~70 km/h
+    run(150)  # 2.5 s of gas, ~80 km/h
     for name, deg in SHOTS:
         game.cam_override = math.radians(deg)
         run(3)

@@ -265,6 +265,14 @@ HAVANA_WHEEL_TEXTURES = (ASSETS / "vehicle" / "wheels" / "havana").as_posix()
 # Driving world -------------------------------------------------------------
 DRIVE_FOG_DENSITY = 0.005       # exponential fog density for the ground plane
 DRIVE_BOUNDARY_MARGIN = 12.0    # keep the car this far inside the ground quad
+# Chase camera (drive.py).  Heights are above the car body's origin (~0.77 m
+# off the road).  The aim point sits LOOK_AHEAD metres in front of the car in
+# the chase view and slides back onto the car as the right stick orbits round.
+CHASE_CAM_DIST = 7.5            # metres behind the car (was 10)
+CHASE_CAM_HEIGHT = 2.0          # was 3.6
+CHASE_CAM_LOOK_AHEAD = 6.0      # was 0: aimed at the car itself
+CHASE_CAM_LOOK_HEIGHT = 0.0     # was 0.8
+CHASE_CAM_FOV = 60.0            # horizontal degrees (Panda default 40)
 
 # Wheels -------------------------------------------------------------------
 # Wheel speeds are rad/s x 100 (0.327 m tyre radius): 3300 ~ 11 m/s.
