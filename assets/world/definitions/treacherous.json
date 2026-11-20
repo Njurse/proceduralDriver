@@ -37,10 +37,11 @@
     "detail_tile_m": 8.0
   },
   "roads": {
-    "grid_spacing_m": 600.0,
+    "grid": 0.0,
+    "grid_spacing_m": 800.0,
     "jitter_m": 40.0,
     "curviness_m": 66.0,
-    "width_m": 9.0,
+    "width_m": 8.0,
     "shoulder_m": 12.0,
     "max_grade_pct": 12.0,
     "surface": "asphalt",

@@ -6,9 +6,11 @@ below:
 
 ``terrain``  the biome's height field (world.terrain.Terrain: fbm, ridged
              or terraced noise) and the colour ramp its chunks are painted with
-``roads``    the jittered road grid the biome grows (world.roads), with
+``roads``    the roads the biome grows (world.roads), with
              optional dashed centre ``markings``
 ``weight``   (top level) how often world.regions picks the biome for a region
+``region_size`` (top level) the biome claims blocks of this many x this many
+             region sites, so 3 makes regions about three times as wide
 
 A bad value or an unknown key inside those sections raises ValueError naming
 the file and the key, since a typo would otherwise fall back to the default
@@ -72,6 +74,11 @@ class RoadRules:
     color: RGB = (0.30, 0.30, 0.32)
     flatten: bool = True             # cut/fill the terrain to the road's profile
     markings: RGB | None = None      # dashed centre line colour, or none
+    grid: float = 0.0                # 0 organic roads .. 1 a city grid
+    grid_heading_deg: float | None = None  # grid heading; none: random per region
+    loop_odds: float = 0.12          # organic: odds a short non-tree link makes a loop
+    l_corner_odds: float = 0.0       # organic: odds a road turns a square L corner
+    corner_radius_m: float | None = None  # bend radius; none: one smooth curve, 0: sharp
 
 
 @dataclass(frozen=True)
@@ -81,6 +88,7 @@ class Biome:
     roads: RoadRules
     extra: dict                      # every other top-level field, as read
     weight: float = 1.0              # relative odds of the biome per region
+    region_size: int = 1             # regions span this many sites each way
 
 
 _LIMITS = {
@@ -101,8 +109,15 @@ _LIMITS = {
     "terrace_steps": (2, 24),
     "terrace_ramp": (0.1, 0.9),
     "weight": (0.0, 100.0),
+    "region_size": (1, 6),
+    "grid": (0.0, 1.0),
+    "grid_heading_deg": (-360.0, 360.0),
+    "loop_odds": (0.0, 1.0),
+    "l_corner_odds": (0.0, 1.0),
+    "corner_radius_m": (0.0, 500.0),
 }
 _OPTIONAL_RGB = {"markings"}
+_OPTIONAL_NUMBER = {"grid_heading_deg", "corner_radius_m"}
 
 
 def _is_number(v):
@@ -113,6 +128,8 @@ def _value(where, key, raw, default):
     """``raw`` checked against the type of ``default`` and _LIMITS[key]."""
     if key in _OPTIONAL_RGB and (raw is None or default is None):
         return None if raw is None else _value(where, key, raw, (0.0, 0.0, 0.0))
+    if key in _OPTIONAL_NUMBER and (raw is None or default is None):
+        return None if raw is None else _value(where, key, raw, 0.0)
     if isinstance(default, bool):
         if not isinstance(raw, bool):
             raise ValueError(f"{where}.{key}: expected true or false, got {raw!r}")
@@ -180,8 +197,11 @@ def parse_biome(data, where="biome", default_name="biome"):
         raise ValueError(f"{where}.terrain.detail_texture: no file assets/"
                          f"{terrain.detail_texture}")
     weight = _value(where, "weight", data.get("weight", 1.0), 1.0)
-    extra = {k: v for k, v in data.items() if k not in ("name", "terrain", "roads", "weight")}
-    return Biome(name=name, terrain=terrain, roads=roads, extra=extra, weight=weight)
+    size = _value(where, "region_size", data.get("region_size", 1), 1)
+    extra = {k: v for k, v in data.items()
+             if k not in ("name", "terrain", "roads", "weight", "region_size")}
+    return Biome(name=name, terrain=terrain, roads=roads, extra=extra, weight=weight,
+                 region_size=size)
 
 
 def load_biome(name):

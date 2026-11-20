@@ -1,6 +1,7 @@
 """Biomes (world/biomes.py), regions (world/regions.py) and roads
-(world/roads.py) as one drivable World (world/world.py)."""
+(world/roads) as one drivable World (world/world.py)."""
 
+import dataclasses
 import math
 import os
 import sys
@@ -18,7 +19,7 @@ from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
 from world.biomes import load_biome, load_biomes, parse_biome  # noqa: E402
 from world.chunks import chunk_mesh, terrain_colors  # noqa: E402
 from world.ground import Ground  # noqa: E402
-from world.roads import MARKING_LIFT  # noqa: E402
+from world.roads import MARKING_LIFT, layout  # noqa: E402
 from world.world import World  # noqa: E402
 
 DT = 1.0 / 60.0
@@ -62,13 +63,17 @@ def _borders(world, n=12, reach=12000.0):
 
 
 def _road_points(world, n=40):
-    """Centreline points of the roads round the origin, away from nodes."""
+    """Centreline points of the roads round the origin, away from nodes and
+    from other roads (organic roads may cross without a node)."""
     out = []
-    for r in world.roads.roads_near(-600.0, -600.0, 600.0, 600.0):
+    roads = world.roads.roads_near(-600.0, -600.0, 600.0, 600.0)
+    for r in roads:
         reach = r.half_width + r.shoulder + 30.0
         s = np.concatenate([[0.0], np.cumsum(np.hypot(r.dx, r.dz))])
         for k in range(len(r.pts) - 1):
-            if reach < s[k] < s[-1] - reach:
+            x, z = np.array([r.pts[k, 0]]), np.array([r.pts[k, 1]])
+            if reach < s[k] < s[-1] - reach and not any(
+                    o is not r and o.terms(x, z)[0][0] < reach for o in roads):
                 out.append((r, k))
     rng = np.random.default_rng(3)
     return [out[i] for i in rng.choice(len(out), min(n, len(out)), replace=False)]
@@ -183,7 +188,9 @@ def test_the_world_is_deterministic():
 
 
 def test_chunks_and_road_strips_meet_without_seams(world):
-    keys = [(i, k) for i in range(-3, 3) for k in range(-3, 3)]
+    x, z, _ = world.spawn()  # a 6 x 6 chunk block round the spawn road
+    ci, ck = int(x // SIZE), int(z // SIZE)
+    keys = [(i, k) for i in range(ci - 3, ci + 3) for k in range(ck - 3, ck + 3)]
     meshes = {key: chunk_mesh(world, *key) for key in keys}
     res = config.TERRAIN_CHUNK_RES
     for (i, k), m in meshes.items():
@@ -196,9 +203,9 @@ def test_chunks_and_road_strips_meet_without_seams(world):
             np.testing.assert_array_equal(g[-1], n[0])
     # every road segment in the block is drawn by exactly one chunk, and the
     # strips of neighbouring chunks share their end vertices exactly
-    lo, hi = -3 * SIZE, 3 * SIZE
+    lo, hi = np.array([ci - 3, ck - 3]) * SIZE, np.array([ci + 3, ck + 3]) * SIZE
     expected = segments = 0
-    for r in world.roads.roads_near(lo, lo, hi, hi):
+    for r in world.roads.roads_near(*lo, *hi):
         mid = 0.5 * (r.pts[:-1] + r.pts[1:])
         inside = np.nonzero((mid >= lo).all(axis=1) & (mid < hi).all(axis=1))[0]
         segments += len(inside)
@@ -206,7 +213,7 @@ def test_chunks_and_road_strips_meet_without_seams(world):
         expected += 4 * len(inside) + 2 * dashes   # road quads + dashed centre line
     strips = [world.road_mesh(*key) for key in keys]
     strips = [s for s in strips if s is not None]
-    assert segments > 50
+    assert segments > 30
     assert sum(len(s.tris) for s in strips) == expected
     verts = {}
     for s in strips:
@@ -253,19 +260,56 @@ def test_off_road_is_offroad(world):
             assert world(x + dx, z + dz)[2] == SURFACE_OFFROAD
 
 
-def test_sparse_biomes_keep_every_nth_grid_line(world):
-    roads = world.roads
-    assert roads.every["desert"] == 2 and roads.every["treacherous"] == 3
-    seen = dict.fromkeys(roads.every, 0)
-    for i in range(-15, 15):
-        for j in range(-15, 15):
-            for kind, mid, line in [("h", ((i + 0.5) * roads.base, j * roads.base), j),
-                                    ("v", (i * roads.base, (j + 0.5) * roads.base), i)]:
-                name = world.regions.biome_at(*mid).name
-                exists = roads.road(kind, i, j) is not None
-                assert exists == (line % roads.every[name] == 0)
-                seen[name] += exists
-    assert seen["plains"] > 0 and seen["desert"] > 0
+def _two_biomes(**village):
+    """A world of village and jungle (organic) only, village roads changed."""
+    bs = {b.name: b for b in load_biomes()}
+    v = dataclasses.replace(bs["village"],
+                            roads=dataclasses.replace(bs["village"].roads, **village))
+    return World(biomes=[v, bs["jungle"]])
+
+
+def _supercell(w, biome):
+    site = w.regions.site_of(biome)
+    return tuple(math.floor(c / layout.SUPER_M) for c in site)
+
+
+def test_a_full_grid_runs_along_the_region_heading():
+    w = _two_biomes(grid=1.0, grid_heading_deg=30.0)
+    g = w.roads.graph(*_supercell(w, "village"))
+    off = [abs((math.degrees(math.atan2(g.z[b] - g.z[a], g.x[b] - g.x[a])) - 30.0 + 45.0)
+               % 90.0 - 45.0) for a, b in g.edges if min(g.g[a], g.g[b]) > 0.99]
+    assert len(off) > 40
+    assert np.mean(np.array(off) < 3.0) > 0.8
+
+
+def test_no_grid_is_the_organic_network_whatever_the_heading():
+    a = _two_biomes(grid=0.0, grid_heading_deg=0.0)
+    b = _two_biomes(grid=0.0, grid_heading_deg=45.0)
+    for cell in [(0, 0), _supercell(a, "village")]:
+        ga, gb = a.roads.graph(*cell), b.roads.graph(*cell)
+        assert not ga.grid.any() and ga.edges == gb.edges
+        np.testing.assert_array_equal(ga.x, gb.x)
+
+
+def test_grid_blends_smoothly_and_roads_stay_connected():
+    w = _two_biomes(grid=1.0)
+    p = np.array(w.regions.site_of("village"))
+    q = np.array(w.regions.site_of("jungle", near=tuple(p)))
+    t = np.linspace(0.0, 1.0, 400)[:, None]
+    line = p + t * (q - p)
+    g, _, _ = layout.field(w.regions, line[:, 0], line[:, 1])
+    assert g[0] > 0.99 and g[-1] < 0.01
+    assert np.abs(np.diff(g)).max() < 0.05     # steps of a few metres: no jumps
+    gr = w.roads.graph(*_supercell(w, "village"))
+    parent = list(range(len(gr.x)))
+
+    def root(a):
+        while parent[a] != a:
+            a = parent[a]
+        return a
+    for a, b in gr.edges:
+        parent[root(a)] = root(b)
+    assert len({root(a) for a in range(len(gr.x))}) == 1   # one network
 
 
 # -------------------------------------------------------------------- car
@@ -274,8 +318,9 @@ def _drive(world, x, z, heading, steer_fn, throttle_fn, ticks):
     v.reset(x, z, heading, ground=world)
     pw = PhysicsWorld()
     pw.add(v)
-    start, on_road = v.pos.copy(), 0
+    dist, on_road = 0.0, 0
     for f in range(ticks):
+        last = v.pos.copy()
         v.process_input(_inp(steer=steer_fn(v, f), throttle=throttle_fn(v)))
         pw.step(DT)
         for corner in v.geo.c_points[:4]:
@@ -284,7 +329,8 @@ def _drive(world, x, z, heading, steer_fn, throttle_fn, ticks):
             assert depth < 0.15, f"body corner {depth:.2f} m under the ground at tick {f}"
         assert v.rot[1, 1] > 0.5, f"car on its side at tick {f}"
         on_road += world(v.pos[0], v.pos[2])[2] == SURFACE_ROAD
-    return float(np.linalg.norm((v.pos - start)[[0, 2]])), on_road / ticks
+        dist += float(np.linalg.norm((v.pos - last)[[0, 2]]))
+    return dist, on_road / ticks  # odometer: organic roads can dead-end
 
 
 def _start(world, biome):
@@ -295,13 +341,14 @@ def _start(world, biome):
 @pytest.mark.parametrize("biome", [None, *config.WORLD_BIOMES[2:]])
 def test_car_follows_the_roads_for_25_seconds(world, biome):
     x, z, heading = _start(world, biome)
-    cruise = 16.0 if biome == "jungle" else 22.0  # narrow twisty lanes: ~58 km/h
+    cruise = 15.0  # 54 km/h: 7-12 m roads with real junction corners
     dist, on_road = _drive(
         world, x, z, heading,
         lambda v, f: world.road_steer(v.pos[0], v.pos[2], v.heading),
         lambda v: 1.0 if np.linalg.norm(v.vel) < cruise else 0.0, round(25.0 / DT))
     assert dist > 250.0
-    assert on_road > 0.9, f"on the road {on_road:.0%} of the time"
+    # the autopilot cuts junction corners and turns round at dead ends
+    assert on_road > 0.85, f"on the road {on_road:.0%} of the time"
 
 
 @pytest.mark.parametrize("biome, turn", [(None, math.pi / 2), (None, -math.pi / 2),
@@ -319,3 +366,54 @@ def test_car_crosses_roads_flat_out_for_25_seconds(world, biome, turn):
                            round(25.0 / DT))
     assert dist > 300.0
     assert 0.0 < on_road < 0.5  # it crossed road and open ground
+
+@pytest.mark.parametrize("seed", [1, 7, 42])
+def test_no_junction_is_narrower_than_the_limit(seed):
+    """Every pair of roads meeting at a node (stitches too) leaves it at
+    least config.ROAD_MIN_JUNCTION_DEG apart, measured on the built roads."""
+    w = World(seed=seed)
+    heads = {}
+    for r in w.roads.roads_near(-2500.0, -2500.0, 2500.0, 2500.0):
+        for node, p, q in ((r.key[:3], r.pts[0], r.pts[1]), (r.key[3:], r.pts[-1], r.pts[-2])):
+            heads.setdefault(node, []).append(math.atan2(q[1] - p[1], q[0] - p[0]))
+    gaps = [abs((a - b + math.pi) % (2 * math.pi) - math.pi)
+            for hs in heads.values() for i, a in enumerate(hs) for b in hs[:i]]
+    assert len(gaps) > 300
+    assert math.degrees(min(gaps)) >= config.ROAD_MIN_JUNCTION_DEG - 0.5
+
+
+@pytest.mark.parametrize("radius", [0.0, 40.0])
+def test_l_corners_sharp_or_rounded_and_drivable(radius):
+    w = _two_biomes(grid=0.0, l_corner_odds=1.0, corner_radius_m=radius)
+    x, z = w.regions.site_of("village")
+    roads = [r for r in w.roads.roads_near(x - 300.0, z - 300.0, x + 300.0, z + 300.0)
+             if r.biome.name == "village"]
+    assert len(roads) > 5
+    for r in roads:
+        d = np.diff(r.pts, axis=0)
+        turn = np.degrees(np.abs(np.arctan2(d[1:, 1] * d[:-1, 0] - d[1:, 0] * d[:-1, 1],
+                                            np.einsum("ij,ij->i", d[1:], d[:-1]))))
+        assert 80.0 < turn.sum() < 100.0           # a square L overall
+        assert turn.max() > 80.0 if radius == 0.0 else turn.max() < 12.0  # kink or bend
+        k = int(np.argmax(turn)) + 1             # the corner: on the road all round it
+        for dx, dz in [(0, 0), (1, 1), (-1, 1), (1, -1), (-1, -1)]:
+            px = r.pts[k] + 0.6 * r.half_width * np.array([dx, dz]) / max(1, math.hypot(dx, dz))
+            assert w.query(*px)[3]
+        s = w.road_mesh(*(math.floor(c / config.TERRAIN_CHUNK_SIZE) for c in r.pts[k]))
+        assert s is not None and np.isfinite(s.pos).all()
+
+
+def test_large_biomes_make_larger_regions(world):
+    """metropolis (region_size 4) regions run far wider than one-site regions."""
+    xs = np.arange(-12000.0, 12000.0, 50.0)
+    owner = world.biome_index(*np.meshgrid(xs, np.arange(-12000.0, 12000.0, 1500.0)))
+    names = [b.name for b in world.biomes]
+    runs = {}
+    for row in owner:
+        edges = np.flatnonzero(np.diff(row)) + 1
+        for seg in np.split(row, edges)[1:-1]:      # whole runs only
+            runs.setdefault(names[seg[0]], []).append(len(seg) * 50.0)
+    big = np.mean(runs["metropolis"])
+    small = np.mean([r for n, rs in runs.items() if n != "metropolis" for r in rs])
+    assert world.biomes[names.index("metropolis")].region_size == 4
+    assert big > 2.0 * small, (big, small)

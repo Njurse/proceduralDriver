@@ -2,6 +2,8 @@
 
 Region sites sit on a jittered square grid (config.REGION_SCALE_M apart), and
 each site picks a biome by a seeded hash, weighted by the biomes' ``weight``.
+A biome with ``region_size`` n > 1 instead claims whole n x n blocks of sites
+(odds: its weight share), so its regions come out n times as wide.
 A point belongs to its nearest site; near the bisector between two sites the
 biomes blend.  Each site within REGION_BAND_M of the nearest one gets
 
@@ -70,7 +72,13 @@ class Regions(SampledGround):
         weights = np.array([b.weight for b in self.biomes], float)
         if weights.sum() <= 0.0:
             raise ValueError("every biome has weight 0")
-        self._cum = np.cumsum(weights) / weights.sum()
+        big = np.array([b.region_size > 1 for b in self.biomes])
+        small = np.where(big, 0.0, weights)
+        if small.sum() <= 0.0:
+            small, big = weights, np.zeros_like(big)
+        self._cum = np.cumsum(small) / small.sum()
+        self._big = [(b, self.biomes[b].region_size, weights[b] / weights.sum())
+                     for b in np.nonzero(big)[0].tolist()]
         self.seed = config.TERRAIN_SEED if seed is None else int(seed)
         self.scale_m = float(config.REGION_SCALE_M if scale_m is None else scale_m)
         self.band_m = float(config.REGION_BAND_M if band_m is None else band_m)
@@ -98,6 +106,9 @@ class Regions(SampledGround):
             x = (i + 0.5 + (2.0 * _hash01(self.seed, 11, i, j) - 1.0) * jit) * s
             z = (j + 0.5 + (2.0 * _hash01(self.seed, 12, i, j) - 1.0) * jit) * s
             pick = np.searchsorted(self._cum, _hash01(self.seed, 13, i, j), side="right")
+            for b, n, odds in self._big:
+                claim = _hash01(self.seed, 14 + b, np.floor_divide(i, n), np.floor_divide(j, n))
+                pick = np.where(claim < odds, b, pick)
             pos = np.stack([x, z], axis=1)
             owner = np.minimum(pick, len(self.biomes) - 1)
             hit = self._cells[key] = (pos, owner,
@@ -169,6 +180,25 @@ class Regions(SampledGround):
         tx, tz = wx.sum(axis=1, keepdims=True), wz.sum(axis=1, keepdims=True)
         wn = w / total
         return wn, (wx - wn * tx) / total, (wz - wn * tz) / total
+
+    def site_mean(self, x, z, values):
+        """Per point, the mean of per-site ``values(pos (k, 2), biome (k,))``
+        -> (k, m), weighted like the terrain blend (no gradients): (n, m)."""
+        x, z = np.atleast_1d(np.asarray(x, float)), np.atleast_1d(np.asarray(z, float))
+        ci = np.floor(x / self.scale_m).astype(np.int64)
+        cj = np.floor(z / self.scale_m).astype(np.int64)
+        out = None
+        for cell in np.unique(np.stack([ci, cj], axis=1), axis=0):
+            m = np.nonzero((ci == cell[0]) & (cj == cell[1]))[0]
+            pos, owner, _ = self._sites(int(cell[0]), int(cell[1]))
+            d = np.hypot(x[m, None] - pos[None, :, 0], z[m, None] - pos[None, :, 1])
+            t = np.clip((d - d.min(axis=1, keepdims=True)) / self.band_m, 0.0, 1.0)
+            f = 1.0 - t * t * (3.0 - 2.0 * t)
+            v = values(pos, owner)
+            if out is None:
+                out = np.zeros((len(x), v.shape[1]))
+            out[m] = f @ v / f.sum(axis=1, keepdims=True)
+        return out
 
     def biome_index(self, x, z):
         """Index of the biome weighted most at each point (array)."""

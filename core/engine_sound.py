@@ -10,7 +10,8 @@ samples.  Every level is smoothed here so nothing jumps between frames.
   load  the throttle, cut to zero during a gear change: on-load is louder
         and brighter than off-load (engine braking).
   mix   idle loop at low rpm, engine loop above, with an equal-power
-        crossfade; skid loop from tyre slip with on/off hysteresis.
+        crossfade; skid loop from tyre slip with on/off hysteresis, its
+        volume rising with the slip.
 """
 
 import math
@@ -28,8 +29,7 @@ class SoundInput:
     throttle: float = 0.0  # 0..1
     wheelspin: bool = False
     rear_airborne: bool = False
-    slip: float = 0.0  # m/s, the largest tyre slip
-    handbrake: bool = False
+    slip: float = 0.0  # m/s, core.vehicle_audio.skid_slip (0 = no tyre skidding)
 
 
 @dataclass(frozen=True)
@@ -96,8 +96,6 @@ class EngineSound:
         self.idle = approach(self.idle, config.IDLE_GAIN * idle_w, dt, config.LEVEL_TIME)
 
         slip = inp.slip
-        if inp.handbrake and abs(inp.speed) > config.SKID_HB_SPEED_MIN:
-            slip = max(slip, config.SKID_SLIP_ON)
         if slip > config.SKID_SLIP_ON:
             self.skidding = True
         elif slip < config.SKID_SLIP_OFF:
@@ -105,7 +103,8 @@ class EngineSound:
         skid = 0.0
         if self.skidding:
             span = config.SKID_SLIP_FULL - config.SKID_SLIP_OFF
-            skid = config.SKID_GAIN * min(max((slip - config.SKID_SLIP_OFF) / span, 0.3), 1.0)
+            share = (slip - config.SKID_SLIP_OFF) / span
+            skid = config.SKID_GAIN * min(max(share, config.SKID_LEVEL_MIN), 1.0)
         tau = config.SKID_ATTACK_TIME if skid > self.skid else config.SKID_RELEASE_TIME
         self.skid = approach(self.skid, skid, dt, tau)
         return Mix(self.rpm, self.load, self.idle, self.engine, self.skid)

@@ -12,6 +12,7 @@ Save policy:
     the old file as world_<old seed>.json before the new world takes over.
 """
 
+import logging
 import math
 import random
 import shutil
@@ -23,6 +24,8 @@ from core.redriver2_physics import PhysicsWorld, Vehicle
 from world.chunks import chunks_around
 from world.save import SaveState, free_path, read_save, write_save
 from world.world import World
+
+log = logging.getLogger(__name__)
 
 
 class Explorer:
@@ -70,6 +73,8 @@ class Session:
         self.physics.add(self.vehicle)
         self.paused = False
         self._build(int(seed), state)
+        log.info("seed %d: %s (save file: %s)", self.seed,
+                 "save loaded" if state is not None else "new world", self.save_path or "off")
 
     def _build(self, seed, state=None):
         self.seed = seed
@@ -126,4 +131,5 @@ class Session:
         if self.save_path is None:
             return False
         write_save(self.save_path, self.state())
+        log.info("saved %s (%d chunks discovered)", self.save_path, len(self.explorer.discovered))
         return True

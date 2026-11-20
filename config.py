@@ -36,12 +36,23 @@ DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far pla
 
 # Biomes, regions and roads (world/biomes.py, world/regions.py, world/roads.py)
 WORLD_BIOMES = ("plains", "desert", "canyon", "coastal_beach", "jungle", "treacherous",
-                "village")      # assets/world/definitions/<name>.json
+                "village", "metropolis", "british_town")  # assets/world/definitions/<name>.json
 REGION_SCALE_M = 900.0          # spacing of the region sites that splotch the biomes
 REGION_JITTER = 0.35            # site shift, as a fraction of the spacing
 REGION_BAND_M = 240.0           # width of the blend between neighbouring regions
+ROAD_MIN_JUNCTION_DEG = 45.0     # no two roads leave a junction closer than this
 ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
 ROAD_DETAIL_TILE_M = 2.5        # metres per repeat of the road detail texture
+
+# Traffic (world/traffic.py, game/traffic_view.py); TRAFFIC_MAX = 0 turns it off
+TRAFFIC_MAX = 12                # cars at once
+TRAFFIC_SPEED_MS = 12.0         # cruising speed (each car 0.8-1.1x)
+TRAFFIC_SPAWN_MIN_M = 60.0      # cars appear between these distances from the player
+TRAFFIC_SPAWN_M = 300.0
+TRAFFIC_DESPAWN_M = 450.0       # and vanish beyond this
+TRAFFIC_GAP_M = 8.0             # stopped this far behind the car ahead
+TRAFFIC_ACCEL = 3.0             # m/s^2
+TRAFFIC_BRAKE = 8.0             # m/s^2
 
 # Save file, world export and minimap (world/save.py, world/worldmap.py, ui/)
 SAVE_PATH = ROOT / "saves" / "world.json"
@@ -112,12 +123,15 @@ ENGINE_GAIN_ON_LOAD = 1.0
 ENGINE_GAIN_OFF_LOAD = 0.45
 IDLE_GAIN = 0.6
 
-# Slip is the sideways (or locked/spinning) speed at a tyre's contact, m/s.
-# Normal hard cornering slides ~0.6 m/s; handbrake turns 0.8-1.5 m/s.
-SKID_SLIP_ON = 1.0
-SKID_SLIP_OFF = 0.5
-SKID_SLIP_FULL = 3.0
-SKID_GAIN = 0.7
+# Skid loop, after handling.c CheckCarEffects.  Slip is
+# core/vehicle_audio.skid_slip: the sideways or spin slip of grounded rear tyres
+# and the slip of grounded locked tyres, m/s.  Cornering on the stick keeps the
+# rears under ~1.9 m/s; a handbrake turn or a braking lockup is 15-30 m/s.
+SKID_SLIP_ON = 2.0
+SKID_SLIP_OFF = 1.4             # hysteresis: keeps skidding down to this
+SKID_SLIP_FULL = 8.0            # full volume from here
+SKID_LEVEL_MIN = 0.25           # share of SKID_GAIN while barely skidding
+SKID_GAIN = 1.4                 # skid.wav is quiet (RMS ~0.1)
 SKID_ATTACK_TIME = 0.04
 SKID_RELEASE_TIME = 0.2
-SKID_HB_SPEED_MIN = 4.0         # m/s
+SKID_SPEED_MIN = 3.0            # m/s over the ground; slower never skids (bar wheelspin)

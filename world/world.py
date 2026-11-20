@@ -31,12 +31,7 @@ class World(SampledGround):
         h, hx, hz = self.regions.sample(x, z)
         if np.ndim(x) == 0 and np.ndim(z) == 0:
             x, z = float(x), float(z)
-            roads = self.roads.roads_near(x, z, x, z)
-            if not roads:
-                return h, hx, hz, False
-            out = self.roads.blend(roads, np.array([x]), np.array([z]), np.array([h]),
-                                   np.array([hx]), np.array([hz]))
-            return float(out[0][0]), float(out[1][0]), float(out[2][0]), bool(out[3][0])
+            return self.roads.query_point(x, z, h, hx, hz)
         x, z = np.broadcast_arrays(np.asarray(x, float), np.asarray(z, float))
         shape = x.shape
         x, z = x.ravel(), z.ravel()
@@ -84,12 +79,22 @@ class World(SampledGround):
 
     def road_steer(self, x, z, heading, lookahead=15.0, gain=2.5):
         """Steering (-1 left .. 1 right) that follows the nearest road the
-        way the car already points: aim at a point ``lookahead`` metres down
-        the road.  An autopilot for screenshots and tests."""
-        _, p, tan, _ = self.roads.nearest(x, z)
+        way the car already points: aim at a point ``lookahead`` metres on
+        along the road's bends (its end node at most, where the next road
+        takes over).  An autopilot for screenshots and tests."""
+        _, p, tan, road = self.roads.nearest(x, z)
+        k = int(road.terms(np.array([float(x)]), np.array([float(z)]))[6][0])
+        pts = road.pts
         if tan[0] * math.sin(heading) + tan[1] * math.cos(heading) < 0.0:
-            tan = -tan
-        tx, tz = p + tan * lookahead - np.array([x, z])
+            pts, k = pts[::-1], len(pts) - 2 - k
+        aim, left = p, lookahead
+        for q in pts[k + 1:]:
+            step = float(np.hypot(*(q - aim)))
+            if step >= left:
+                aim = aim + (q - aim) * (left / step)
+                break
+            aim, left = q, left - step
+        tx, tz = aim - np.array([x, z])
         err = (math.atan2(tx, tz) - heading + math.pi) % (2.0 * math.pi) - math.pi
         return max(-1.0, min(1.0, gain * err))
 
