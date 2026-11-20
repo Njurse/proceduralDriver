@@ -52,12 +52,12 @@ def _lru(cache, key, make, limit):
 
 
 class RoadNetwork:
-    """The roads over a worldgen.regions.Regions."""
+    """The roads of a WorldSpec over its worldgen.regions.Regions."""
 
-    def __init__(self, regions, seed=None):
-        self.regions = regions
-        self.seed = regions.seed if seed is None else int(seed)
-        self.min_junction_deg = regions.spec.roads.min_junction_deg
+    def __init__(self, spec, regions):
+        self.spec, self.regions = spec, regions
+        self.seed = spec.seed
+        self.min_junction_deg = spec.roads.min_junction_deg
         self._graphs, self._cells = OrderedDict(), OrderedDict()
         self._roads, self._segs = {}, {}
         self._reach = max(0.5 * b.roads.width_m + b.roads.shoulder_m for b in regions.biomes)

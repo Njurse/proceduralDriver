@@ -22,7 +22,7 @@ class WorldGround(SampledGround):
     def __init__(self, spec):
         self.spec = spec
         self.regions = Regions(spec)
-        self.roads = RoadNetwork(self.regions)
+        self.roads = RoadNetwork(spec, self.regions)
         self.biomes = self.regions.biomes
         self.detail_tile_m = self.biomes[0].terrain.detail_tile_m   # uv scale of every chunk
 
