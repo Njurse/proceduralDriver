@@ -41,6 +41,16 @@ REGION_BAND = 0.08              # blend half-width in region-noise units (~200 m
 ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
 ROAD_DETAIL_TILE_M = 2.5        # metres per repeat of the road detail texture
 
+# Save file, world export and minimap (world/save.py, world/worldmap.py, ui/)
+SAVE_PATH = ROOT / "saves" / "world.json"
+EXPORT_DIR = ROOT / "exports"
+EXPORT_M_PER_PX = 2.0           # world export resolution
+MINIMAP_SIZE_PX = 200           # on-screen size, top right
+MINIMAP_TEXTURE_PX = 200        # map image pixels: 1:1 with the screen
+MINIMAP_ZOOMS = (16, 4)         # map pixels per chunk: near (12.5 chunks across), far (50)
+MINIMAP_REFRESH_FRAMES = 10     # redraw the map image at most this often
+MINIMAP_TILES_PER_FRAME = 2     # chunk tiles sampled per frame for the map
+
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in
 # the chase view and slides back onto the car as the right stick orbits round.

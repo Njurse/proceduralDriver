@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 reference/
 screenshots/
+saves/*.json
+saves/*.tmp
+exports/
