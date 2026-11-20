@@ -68,11 +68,12 @@ class RoadNetwork:
             pairs = [((ci, cj, a), (ci, cj, b)) for a, b in ga.edges]
             for axis, nb in ((0, (ci + 1, cj)), (1, (ci, cj + 1))):
                 pairs += [((ci, cj, a), (*nb, b)) for a, b in
-                          layout.stitch(ga, self.graph(*nb), axis, nb[axis] * SUPER_M)]
+                          layout.stitch(ga, self.graph(*nb), axis, nb[axis] * SUPER_M,
+                                       self.seed)]
             tiles, r = {}, self._reach
             for ra, rb in pairs:
                 ra, rb = min(ra, rb), max(ra, rb)
-                (ax, az, _, _), (bx, bz, _, _) = self._node(ra), self._node(rb)
+                (ax, az, *_), (bx, bz, *_) = self._node(ra), self._node(rb)
                 box = (min(ax, bx) - r, min(az, bz) - r, max(ax, bx) + r, max(az, bz) + r)
                 ref = (ra + rb, ra, rb, box)
                 for ti in range(math.floor(box[0] / _TILE_M), math.floor(box[2] / _TILE_M) + 1):
@@ -83,9 +84,7 @@ class RoadNetwork:
         return _lru(self._cells, (ci, cj), make, _CELLS)
 
     def _node(self, ref):
-        g = self.graph(ref[0], ref[1])
-        k = ref[2]
-        return float(g.x[k]), float(g.z[k]), float(g.h[k]), float(g.g[k])
+        return self.graph(ref[0], ref[1]).node(ref[2])
 
     def _road(self, key, ra, rb):
         if key not in self._roads:
@@ -93,8 +92,7 @@ class RoadNetwork:
                 self._roads.clear()
             a, b = self._node(ra), self._node(rb)
             biome = self.regions.biome_at(0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]))
-            self._roads[key] = build(self.regions, self.seed, key, a, b, biome,
-                                     0.5 * (a[3] + b[3]))
+            self._roads[key] = build(self.regions, self.seed, key, a, b, biome)
         return self._roads[key]
 
     # ------------------------------------------------------------ queries

@@ -11,8 +11,11 @@ on the field where it stands, so nodes are deterministic and seamless.
 Edges: a minimum spanning tree over neighbour pairs (cost = length x (1 +
 GRADE_COST x grade), so roads take the gentle way and every node is
 reached), plus the one-block axis pairs between grid nodes, plus a few short
-organic cross-links for loops.  A non-tree edge leaving a node within
-MIN_ANGLE_DEG of another edge is dropped: no near-parallel roads.
+organic cross-links for loops.  Each edge bends at its ``apex`` (a hashed
+sideways bow) and leaves its nodes towards it; an edge leaving a node within
+config.ROAD_MIN_JUNCTION_DEG of another is dropped, so no junction is
+narrower than that.  The tree is grown the same way, so a node whose every
+link would make a narrow junction stays off the network.
 
 Super-cells are SUPER_M squares; each graph depends only on (seed, cell).
 Neighbours are joined by the cheapest crossing pair per BORDER_RUN_M of
@@ -25,13 +28,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
+import config
 from world.regions import _hash01 as _hash_arr
 
 SUPER_M = 4096.0
 PITCH_M = 128.0          # candidate lattice: also the closest two junctions get
 LINK_RANGE = 1.6         # candidate edges reach this many local spacings
-CROSS_ODDS = 0.12        # short organic non-tree candidates kept as loops
-MIN_ANGLE_DEG = 25.0
 GRADE_COST = 8.0
 BORDER_RUN_M = 1024.0
 _N = round(SUPER_M / PITCH_M)
@@ -53,8 +55,13 @@ def hash01(*keys):
 
 
 def field(regions, x, z):
-    """(grid, heading, spacing) arrays at points: each region's biome rules,
-    blended by the terrain's region weights.  Each region adds its grid
+    """(grid, heading, spacing) arrays at points (see rules)."""
+    return rules(regions, x, z)[:3]
+
+
+def rules(regions, x, z):
+    """(grid, heading, spacing, curviness, loops) arrays at points: each
+    region's biome rules, blended by the terrain's region weights.  Each region adds its grid
     strength times the unit vector of 4 x its heading (a square grid repeats
     every quarter turn); the sum's length is the grid strength and its angle
     / 4 the heading, so where regions disagree the grid fades."""
@@ -65,10 +72,13 @@ def field(regions, x, z):
                        else math.radians(4.0 * r.grid_heading_deg) for k, r in enumerate(rules)])
         g = np.array([r.grid for r in rules])
         return np.stack([g * np.cos(a4), g * np.sin(a4),
-                         [r.grid_spacing_m for r in rules]], axis=1)
+                         [r.grid_spacing_m for r in rules],
+                         [r.curviness_m for r in rules],
+                         [r.loop_odds for r in rules]], axis=1)
 
     v = regions.site_mean(x, z, per_site)
-    return np.hypot(v[:, 0], v[:, 1]), 0.25 * np.arctan2(v[:, 1], v[:, 0]), v[:, 2]
+    return (np.hypot(v[:, 0], v[:, 1]), 0.25 * np.arctan2(v[:, 1], v[:, 0]),
+            v[:, 2], v[:, 3], v[:, 4])
 
 
 @dataclass
@@ -80,8 +90,32 @@ class Graph:
     g: np.ndarray          # grid strength where the node stands
     heading: np.ndarray
     spacing: np.ndarray
+    curv: np.ndarray       # curviness_m where the node stands
+    loops: np.ndarray      # loop_odds where the node stands
     edges: list            # [(i, j)]
+    dirs: dict = None      # {node: [departure headings]}
     ms: float = 0.0
+
+    def node(self, k):
+        """(x, z, h, grid strength, curviness) of node k, plain floats."""
+        return (float(self.x[k]), float(self.z[k]), float(self.h[k]), float(self.g[k]),
+                float(self.curv[k]))
+
+
+def apex(seed, a, b):
+    """The bend point (x, z) of the road between nodes a and b, (x, z, h, g,
+    curv) each: the chord's midpoint bowed sideways by a hash of the two
+    ends, up to the nodes' mean curviness (none on a grid) and 0.3 x the
+    chord.  The same whichever end comes first."""
+    if (b[0], b[1]) < (a[0], a[1]):
+        a, b = b, a
+    cx, cz = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(cx, cz)
+    g = 0.5 * (a[3] + b[3])
+    reach = min(0.5 * (a[4] + b[4]) * (1.0 - g), 0.3 * length)
+    key = (round(a[0] * 8), round(a[1] * 8), round(b[0] * 8), round(b[1] * 8))
+    bow = (2.0 * hash01(seed, 3, *key) - 1.0) * reach / max(length, 1e-9)
+    return 0.5 * (a[0] + b[0]) - cz * bow, 0.5 * (a[1] + b[1]) + cx * bow
 
 
 def _rot(x, z, a):
@@ -95,7 +129,7 @@ def grow(regions, seed, ci, cj):
     ii, jj = np.meshgrid(np.arange(_N) + ci * _N, np.arange(_N) + cj * _N, indexing="ij")
     ii, jj = ii.ravel(), jj.ravel()
     qx, qz = (ii + 0.5) * PITCH_M, (jj + 0.5) * PITCH_M
-    g, th, sp = field(regions, qx, qz)
+    g, th, sp, cv, lo = rules(regions, qx, qz)
     is_grid = _hash_arr(seed, 31, ii, jj) < g
     # grid: snap to the turned lattice; keep when this cell holds the point
     u, w = _rot(qx, qz, -th)
@@ -109,7 +143,8 @@ def grow(regions, seed, ci, cj):
     x = np.where(is_grid, gx, ox)[sel]
     z = np.where(is_grid, gz, oz)[sel]
     graph = Graph(x, z, np.asarray(regions.height(x, z), float), is_grid[sel], g[sel],
-                  th[sel], sp[sel], [])
+                  th[sel], sp[sel], cv[sel], lo[sel], [])
+    graph.dirs = {}
     graph.edges = _edges(graph, seed, ci, cj)
     graph.ms = (time.perf_counter() - t0) * 1000.0
     return graph
@@ -145,50 +180,48 @@ def _edges(gr, seed, ci, cj):
             a = parent[a]
         return a
 
-    tree, extra = [], []
+    out, extra, dirs = [], [], gr.dirs
     aligned = _aligned(gr, i, j, d)
     for k in np.argsort(cost, kind="stable"):
-        a, b = root(i[k]), root(j[k])
-        if a != b:
-            parent[a] = b
-            tree.append((int(i[k]), int(j[k])))
-        elif aligned[k] or (d[k] < 1.2 * gr.spacing[i[k]] and hash01(
-                seed, 35, ci, cj, int(i[k]), int(j[k])) < CROSS_ODDS * (1.0 - gr.g[i[k]])):
-            extra.append((int(i[k]), int(j[k])))
-    out = tree[:]
-    dirs = {}
-    for a, b in tree:
-        _add_dir(dirs, gr, a, b)
-    for a, b in extra:
-        if _clear(dirs, gr, a, b):
-            _add_dir(dirs, gr, a, b)
-            out.append((a, b))
+        a, b = int(i[k]), int(j[k])
+        ra, rb = root(a), root(b)
+        if ra != rb:
+            if _join(dirs, gr, seed, a, b):
+                parent[ra] = rb
+                out.append((a, b))
+        elif aligned[k] or (d[k] < 1.2 * gr.spacing[a] and hash01(
+                seed, 35, ci, cj, a, b) < gr.loops[a] * (1.0 - gr.g[a])):
+            extra.append((a, b))
+    out += [(a, b) for a, b in extra if _join(dirs, gr, seed, a, b)]
     return out
 
 
-def _angle(gr, a, b):
-    return math.atan2(gr.z[b] - gr.z[a], gr.x[b] - gr.x[a])
+def departures(seed, a, b):
+    """Headings (radians) the road a-b leaves a and b at: towards its apex."""
+    px, pz = apex(seed, a, b)
+    return math.atan2(pz - a[1], px - a[0]), math.atan2(pz - b[1], px - b[0])
 
 
-def _add_dir(dirs, gr, a, b):
-    dirs.setdefault(a, []).append(_angle(gr, a, b))
-    dirs.setdefault(b, []).append(_angle(gr, b, a))
+def narrow(t, others):
+    """True if heading t is within config.ROAD_MIN_JUNCTION_DEG of any of others."""
+    lim = math.radians(config.ROAD_MIN_JUNCTION_DEG)
+    return any(abs((t - u + math.pi) % (2 * math.pi) - math.pi) < lim for u in others)
 
 
-def _clear(dirs, gr, a, b):
-    """No edge leaves a or b within MIN_ANGLE_DEG of this one."""
-    lim = math.radians(MIN_ANGLE_DEG)
-    for p, q in ((a, b), (b, a)):
-        t = _angle(gr, p, q)
-        for u in dirs.get(p, ()):
-            if abs((t - u + math.pi) % (2 * math.pi) - math.pi) < lim:
-                return False
+def _join(dirs, gr, seed, a, b):
+    """Add edge a-b to ``dirs`` unless it makes a junction too narrow."""
+    ta, tb = departures(seed, gr.node(a), gr.node(b))
+    if narrow(ta, dirs.get(a, ())) or narrow(tb, dirs.get(b, ())):
+        return False
+    dirs.setdefault(a, []).append(ta)
+    dirs.setdefault(b, []).append(tb)
     return True
 
 
-def stitch(ga, gb, axis, line):
+def stitch(ga, gb, axis, line, seed):
     """Edges (i in ga, j in gb) across the border ``line`` on ``axis``
-    (0: x, 1: z) between two neighbouring super-cells."""
+    (0: x, 1: z) between two neighbouring super-cells, none making a
+    junction narrower than config.ROAD_MIN_JUNCTION_DEG."""
     pa, pb = (ga.x, ga.z)[axis], (gb.x, gb.z)[axis]
     reach = LINK_RANGE * max(ga.spacing.max(initial=0.0), gb.spacing.max(initial=0.0))
     sa, sb = np.nonzero(np.abs(pa - line) < reach)[0], np.nonzero(np.abs(pb - line) < reach)[0]
@@ -203,4 +236,13 @@ def stitch(ga, gb, axis, line):
     best = {}
     for k in np.argsort(cost, kind="stable"):
         best.setdefault(math.floor(along[k] / BORDER_RUN_M), (int(i[k]), int(j[k])))
-    return sorted(out | set(best.values()))
+    da, db, keep = {}, {}, []
+    for a, b in sorted(out | set(best.values())):
+        ta, tb = departures(seed, ga.node(a), gb.node(b))
+        if narrow(ta, ga.dirs.get(a, []) + da.get(a, [])) or narrow(
+                tb, gb.dirs.get(b, []) + db.get(b, [])):
+            continue
+        da.setdefault(a, []).append(ta)
+        db.setdefault(b, []).append(tb)
+        keep.append((a, b))
+    return keep

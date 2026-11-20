@@ -40,6 +40,7 @@ WORLD_BIOMES = ("plains", "desert", "canyon", "coastal_beach", "jungle", "treach
 REGION_SCALE_M = 900.0          # spacing of the region sites that splotch the biomes
 REGION_JITTER = 0.35            # site shift, as a fraction of the spacing
 REGION_BAND_M = 240.0           # width of the blend between neighbouring regions
+ROAD_MIN_JUNCTION_DEG = 45.0     # no two roads leave a junction closer than this
 ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
 ROAD_DETAIL_TILE_M = 2.5        # metres per repeat of the road detail texture
 

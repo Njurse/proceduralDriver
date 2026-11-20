@@ -366,3 +366,17 @@ def test_car_crosses_roads_flat_out_for_25_seconds(world, biome, turn):
                            round(25.0 / DT))
     assert dist > 300.0
     assert 0.0 < on_road < 0.5  # it crossed road and open ground
+
+@pytest.mark.parametrize("seed", [1, 7, 42])
+def test_no_junction_is_narrower_than_the_limit(seed):
+    """Every pair of roads meeting at a node (stitches too) leaves it at
+    least config.ROAD_MIN_JUNCTION_DEG apart, measured on the built roads."""
+    w = World(seed=seed)
+    heads = {}
+    for r in w.roads.roads_near(-2500.0, -2500.0, 2500.0, 2500.0):
+        for node, p, q in ((r.key[:3], r.pts[0], r.pts[1]), (r.key[3:], r.pts[-1], r.pts[-2])):
+            heads.setdefault(node, []).append(math.atan2(q[1] - p[1], q[0] - p[0]))
+    gaps = [abs((a - b + math.pi) % (2 * math.pi) - math.pi)
+            for hs in heads.values() for i, a in enumerate(hs) for b in hs[:i]]
+    assert len(gaps) > 300
+    assert math.degrees(min(gaps)) >= config.ROAD_MIN_JUNCTION_DEG - 0.5

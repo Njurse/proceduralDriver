@@ -74,6 +74,7 @@ class RoadRules:
     markings: RGB | None = None      # dashed centre line colour, or none
     grid: float = 0.0                # 0 organic roads .. 1 a city grid
     grid_heading_deg: float | None = None  # grid heading; none: random per region
+    loop_odds: float = 0.12          # organic: odds a short non-tree link makes a loop
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,7 @@ _LIMITS = {
     "weight": (0.0, 100.0),
     "grid": (0.0, 1.0),
     "grid_heading_deg": (-360.0, 360.0),
+    "loop_odds": (0.0, 1.0),
 }
 _OPTIONAL_RGB = {"markings"}
 _OPTIONAL_NUMBER = {"grid_heading_deg"}

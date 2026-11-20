@@ -12,7 +12,7 @@ import math
 
 import numpy as np
 
-from world.roads.layout import hash01
+from world.roads.layout import apex
 
 SEGMENT_M = 4.0
 SMOOTH_WINDOW_M = 48.0
@@ -96,17 +96,13 @@ class Road:
 
 
 
-def build(regions, seed, key, a, b, biome, grid):
-    """The Road from node a to b, (x, z, h) each; None if they coincide."""
+def build(regions, seed, key, a, b, biome):
+    """The Road from node a to b, (x, z, h, g, curv) each; None if they coincide."""
     p0, p2 = np.array(a[:2]), np.array(b[:2])
-    chord = p2 - p0
-    length = float(np.hypot(*chord))
+    length = float(np.hypot(*(p2 - p0)))
     if length < 1e-3:
         return None
-    perp = np.array([-chord[1], chord[0]]) / length
-    bow = (2.0 * hash01(seed, 3, *key) - 1.0) * min(
-        biome.roads.curviness_m * (1.0 - grid), length * 0.3)
-    p1 = 0.5 * (p0 + p2) + perp * bow
+    p1 = np.array(apex(seed, a, b))
     n = max(4, math.ceil(1.05 * length / SEGMENT_M))
     t = np.linspace(0.0, 1.0, n + 1)[:, None]
     pts = (1 - t) ** 2 * p0 + 2 * t * (1 - t) * p1 + t * t * p2
