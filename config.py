@@ -62,7 +62,7 @@ MINIMAP_SIZE_PX = 200           # on-screen size, top right
 MINIMAP_TEXTURE_PX = 200        # map image pixels: 1:1 with the screen
 MINIMAP_ZOOMS = (16, 4)         # map pixels per chunk: near (12.5 chunks across), far (50)
 MINIMAP_REFRESH_FRAMES = 10     # redraw the map image at most this often
-MINIMAP_TILES_PER_FRAME = 2     # chunk tiles sampled per frame for the map
+MINIMAP_TILES_PER_FRAME = 1     # chunk tiles sampled per frame for the map
 
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in
