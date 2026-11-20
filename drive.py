@@ -41,7 +41,7 @@ from core.gamepad import Gamepad
 from core.orbit_camera import OrbitCamera, orbit_offset
 from core.redriver2_physics import Input, PhysicsWorld, Vehicle
 from core.textures import _to_texture, seamless_fbm
-from core.vehicle_audio import AudioManager, VehicleAudioState
+from core.vehicle_audio import AudioManager, sound_input
 
 log = logging.getLogger("drive")
 
@@ -107,7 +107,6 @@ class DriveSim(ShowBase):
         self._bind_window_events()
 
         self.audio = AudioManager(self.cos)
-        self.audio_state = VehicleAudioState()
         self.spin = 0.0
 
         self.taskMgr.add(self._update, "drive-update")
@@ -437,18 +436,8 @@ class DriveSim(ShowBase):
             f"{hb}" + ("DRIVE" if v.forward_speed >= 0 else "REVERSE"))
 
     def _update_audio(self, dt):
-        v = self.vehicle
-        st = self.audio_state
-        st.speed = v.speed  # m/s
-        st.revs = v.engine_rpm * 4.0  # interim: old audio wants C rev units
-        st.accelerating = v.thrust != 0
-        st.handbrake = v.handbrake
-        st.wheelspin = v.wheelspin
-        st.slip_lateral = max((w.slip_lateral for w in v.wheels), default=0.0)
-        st.slip_longitudinal = max((w.slip_longitudinal for w in v.wheels),
-                                  default=0.0)
         try:
-            self.audio.update(dt, st)
+            self.audio.update(dt, sound_input(self.vehicle))
         except Exception as exc:
             log.debug("[audio] %s", exc)
 

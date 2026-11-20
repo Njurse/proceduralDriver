@@ -287,12 +287,29 @@ SHIFT_TIME_S = 0.2              # thrust cut per upshift (the C's changingGear)
 GEAR_THRUST_SCALES = (0.66, 0.62, 0.58, 0.55)
 
 # Audio (driving) -----------------------------------------------------------
-# Engine and idle follow the gearbox revs (core/vehicle_audio.py).
+# core/engine_sound.py (model) and core/vehicle_audio.py (output).
+AUDIO_RATE = 22050
+AUDIO_BLOCK = 1024              # samples per queued block (~46 ms)
+AUDIO_MASTER_VOLUME = 0.8
+ENGINE_SAMPLE_RPM = 3000.0      # rpm engine.wav sounds like at its own pitch
+IDLE_SAMPLE_RPM = 850.0         # rpm idle.wav sounds like at its own pitch
+FREE_REV_RPM = 4500.0           # clutch-out revs at full throttle (launch, spin)
+CLUTCH_FULL_SPEED = 5.0         # m/s where the clutch is fully in
+SPIN_CLUTCH = 0.4               # clutch share while spinning or airborne
+RPM_RISE_TIME = 0.10            # s, smoothing time constants
+RPM_FALL_TIME = 0.25
+RPM_SHIFT_DROP_TIME = 0.05      # quick drop to the next gear's rpm
+LOAD_TIME = 0.08
+LEVEL_TIME = 0.06               # idle/engine volume smoothing
+ENGINE_GAIN_ON_LOAD = 1.0
+ENGINE_GAIN_OFF_LOAD = 0.45
+IDLE_GAIN = 0.6
 # Slip is the sideways (or locked/spinning) speed at a tyre's contact, m/s.
 # Normal hard cornering slides ~0.6 m/s; handbrake turns 0.8-1.5 m/s.
-SKID_SLIP_THRESHOLD = 1.0
-SKID_SLIP_RELEASE = 0.5
-SKID_VOLUME_MIN = 0.2
-SKID_VOLUME_MAX = 1.0
-SKID_FADE_OUT_MS = 200
+SKID_SLIP_ON = 1.0
+SKID_SLIP_OFF = 0.5
+SKID_SLIP_FULL = 3.0
+SKID_GAIN = 0.7
+SKID_ATTACK_TIME = 0.04
+SKID_RELEASE_TIME = 0.2
 SKID_HB_SPEED_MIN = 4.0         # m/s

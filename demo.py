@@ -24,7 +24,7 @@ except Exception as e:
 from core.car_profile import load_cosmetics
 from core.redriver2_physics import PhysicsWorld, Vehicle
 from core.track import OBBWall, Track
-from core.vehicle_audio import AudioManager, VehicleAudioState
+from core.vehicle_audio import AudioManager, sound_input
 
 
 def make_input(keys):
@@ -96,7 +96,6 @@ def main():
     world.add(vehicle)
 
     audio = AudioManager(cos)
-    audio_state = VehicleAudioState()
 
     running = True
     frame_count = 0
@@ -117,15 +116,7 @@ def main():
         vehicle.process_input(inp)
         world.step(dt)
 
-        # update audio state
-        audio_state.speed = vehicle.speed
-        audio_state.revs = vehicle.engine_rpm * 4.0  # interim: C rev units
-        audio_state.accelerating = vehicle.thrust != 0
-        audio_state.handbrake = vehicle.handbrake
-        audio_state.wheelspin = vehicle.wheelspin
-        audio_state.slip_lateral = max(w.slip_lateral for w in vehicle.wheels)
-        audio_state.slip_longitudinal = max(w.slip_longitudinal for w in vehicle.wheels)
-        audio.update(dt, audio_state)
+        audio.update(dt, sound_input(vehicle))
 
         # render
         screen.fill((20, 24, 30))
@@ -172,8 +163,9 @@ def main():
             f"pos=({vx:.1f},{vz:.1f}) speed={vehicle.speed:.2f} heading={math.degrees(yaw):.1f}",
             f"throttle={vehicle.throttle_input:.2f} brake={vehicle.brake_input:.2f} steer={vehicle.steer_input:.2f}",
             f"wheel_angle={vehicle.wheel_angle} handbrake={vehicle.handbrake} auto_brake={vehicle.auto_brake}",
-            f"thrust={vehicle.thrust} gear={vehicle.gear} rpm={vehicle.engine_rpm:.0f}",
-            f"engine_vol={audio.engine_vol:.2f} idle_vol={audio.idle_vol:.2f} skid_vol={audio.skid_vol:.2f} skid={audio.skid_active}",
+            f"thrust={vehicle.thrust} gear={vehicle.gear + 1} rpm={audio.mix.rpm:.0f}",
+            f"engine={audio.mix.engine_level:.2f} idle={audio.mix.idle_level:.2f} "
+            f"skid={audio.mix.skid_level:.2f} load={audio.mix.load:.2f}",
             f"fps={clock.get_fps():.1f}  verts={len(cos.mesh_vertices)} invert_vertical={cos.invert_vertical}",
             "W/S throttle/brake  A/D steer  LShift fast steer  Space handbrake  Esc quit",
         ]
