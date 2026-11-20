@@ -13,7 +13,7 @@ GRADE_COST x grade), so roads take the gentle way and every node is
 reached), plus the one-block axis pairs between grid nodes, plus a few short
 organic cross-links for loops.  Each edge bends at its ``apex`` (a hashed
 sideways bow) and leaves its nodes towards it; an edge leaving a node within
-config.ROAD_MIN_JUNCTION_DEG of another is dropped, so no junction is
+min_junction_deg (RoadSpec) of another is dropped, so no junction is
 narrower than that.  The tree is grown the same way, so a node whose every
 link would make a narrow junction stays off the network.
 
@@ -28,7 +28,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-import config
 from worldgen.hashing import hash01
 from worldgen.hashing import hash01_arr as _hash_arr
 
@@ -115,7 +114,7 @@ def _rot(x, z, a):
     return c * x - s * z, s * x + c * z
 
 
-def grow(regions, seed, ci, cj):
+def grow(regions, seed, ci, cj, min_junction_deg):
     """The Graph of super-cell (ci, cj)."""
     t0 = time.perf_counter()
     ii, jj = np.meshgrid(np.arange(_N) + ci * _N, np.arange(_N) + cj * _N, indexing="ij")
@@ -137,7 +136,7 @@ def grow(regions, seed, ci, cj):
     graph = Graph(x, z, np.asarray(regions.height(x, z), float), is_grid[sel], g[sel],
                   th[sel], sp[sel], cv[sel], lo[sel], lc[sel], [])
     graph.dirs = {}
-    graph.edges = _edges(graph, seed, ci, cj)
+    graph.edges = _edges(graph, seed, ci, cj, math.radians(min_junction_deg))
     graph.ms = (time.perf_counter() - t0) * 1000.0
     return graph
 
@@ -159,7 +158,7 @@ def _aligned(gr, i, j, d, gr_b=None):
     return gr.grid[i] & b.grid[j] & (off < 0.05) & (np.abs(d / gr.spacing[i] - 1.0) < 0.2)
 
 
-def _edges(gr, seed, ci, cj):
+def _edges(gr, seed, ci, cj, lim):
     n = len(gr.x)
     i, j, d, cost = _candidates(gr.x, gr.z, gr.h, gr.spacing, gr.x, gr.z, gr.h, gr.spacing)
     m = i < j
@@ -178,13 +177,13 @@ def _edges(gr, seed, ci, cj):
         a, b = int(i[k]), int(j[k])
         ra, rb = root(a), root(b)
         if ra != rb:
-            if _join(dirs, gr, seed, a, b):
+            if _join(dirs, gr, seed, a, b, lim):
                 parent[ra] = rb
                 out.append((a, b))
         elif aligned[k] or (d[k] < 1.2 * gr.spacing[a] and hash01(
                 seed, 35, ci, cj, a, b) < gr.loops[a] * (1.0 - gr.g[a])):
             extra.append((a, b))
-    out += [(a, b) for a, b in extra if _join(dirs, gr, seed, a, b)]
+    out += [(a, b) for a, b in extra if _join(dirs, gr, seed, a, b, lim)]
     return out
 
 
@@ -194,26 +193,26 @@ def departures(seed, a, b):
     return math.atan2(pz - a[1], px - a[0]), math.atan2(pz - b[1], px - b[0])
 
 
-def narrow(t, others):
-    """True if heading t is within config.ROAD_MIN_JUNCTION_DEG of any of others."""
-    lim = math.radians(config.ROAD_MIN_JUNCTION_DEG)
+def narrow(t, others, lim):
+    """True if heading t is within lim radians of any of others."""
     return any(abs((t - u + math.pi) % (2 * math.pi) - math.pi) < lim for u in others)
 
 
-def _join(dirs, gr, seed, a, b):
+def _join(dirs, gr, seed, a, b, lim):
     """Add edge a-b to ``dirs`` unless it makes a junction too narrow."""
     ta, tb = departures(seed, gr.node(a), gr.node(b))
-    if narrow(ta, dirs.get(a, ())) or narrow(tb, dirs.get(b, ())):
+    if narrow(ta, dirs.get(a, ()), lim) or narrow(tb, dirs.get(b, ()), lim):
         return False
     dirs.setdefault(a, []).append(ta)
     dirs.setdefault(b, []).append(tb)
     return True
 
 
-def stitch(ga, gb, axis, line, seed):
+def stitch(ga, gb, axis, line, seed, min_junction_deg):
     """Edges (i in ga, j in gb) across the border ``line`` on ``axis``
     (0: x, 1: z) between two neighbouring super-cells, none making a
-    junction narrower than config.ROAD_MIN_JUNCTION_DEG."""
+    junction narrower than min_junction_deg."""
+    lim = math.radians(min_junction_deg)
     pa, pb = (ga.x, ga.z)[axis], (gb.x, gb.z)[axis]
     reach = LINK_RANGE * max(ga.spacing.max(initial=0.0), gb.spacing.max(initial=0.0))
     sa, sb = np.nonzero(np.abs(pa - line) < reach)[0], np.nonzero(np.abs(pb - line) < reach)[0]
@@ -231,8 +230,8 @@ def stitch(ga, gb, axis, line, seed):
     da, db, keep = {}, {}, []
     for a, b in sorted(out | set(best.values())):
         ta, tb = departures(seed, ga.node(a), gb.node(b))
-        if narrow(ta, ga.dirs.get(a, []) + da.get(a, [])) or narrow(
-                tb, gb.dirs.get(b, []) + db.get(b, [])):
+        if narrow(ta, ga.dirs.get(a, []) + da.get(a, []), lim) or narrow(
+                tb, gb.dirs.get(b, []) + db.get(b, []), lim):
             continue
         da.setdefault(a, []).append(ta)
         db.setdefault(b, []).append(tb)

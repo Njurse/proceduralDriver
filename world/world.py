@@ -2,7 +2,7 @@
 
 ``World`` is the Ground the car and the chunk streamer share.  Its height
 field is worldgen.regions.Regions (the biomes in blended regions) with
-world.roads.RoadNetwork cut and filled in; the surface is SURFACE_ROAD on
+worldgen.roads.RoadNetwork cut and filled in; the surface is SURFACE_ROAD on
 the tarmac (or sand track) and SURFACE_OFFROAD everywhere else.
 """
 
@@ -12,10 +12,10 @@ import numpy as np
 
 import config
 from world.chunks import ChunkMesh
-from world.roads import RoadNetwork
 from world.spec import world_spec
 from worldgen.ground import SURFACE_OFFROAD, SURFACE_ROAD, SampledGround
 from worldgen.regions import Regions
+from worldgen.roads import RoadNetwork
 
 
 class World(SampledGround):

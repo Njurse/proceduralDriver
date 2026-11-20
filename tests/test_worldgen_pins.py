@@ -12,8 +12,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from world.chunks import chunk_mesh  # noqa: E402
-from world.roads.lanes import LaneMap  # noqa: E402
 from world.world import World  # noqa: E402
+from worldgen.roads.lanes import LaneMap  # noqa: E402
 
 SEEDS = (42, 1977)
 PINS = {

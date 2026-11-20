@@ -18,10 +18,10 @@ from collections import OrderedDict
 
 import numpy as np
 
-from world.roads import layout, mesh
-from world.roads.layout import SUPER_M
-from world.roads.mesh import MARKING_HALF_WIDTH, MARKING_LIFT
-from world.roads.road import SEGMENT_M, Road, blend, blend_point, build
+from worldgen.roads import layout, mesh
+from worldgen.roads.layout import SUPER_M
+from worldgen.roads.mesh import MARKING_HALF_WIDTH, MARKING_LIFT
+from worldgen.roads.road import SEGMENT_M, Road, blend, blend_point, build
 
 __all__ = ["MARKING_HALF_WIDTH", "MARKING_LIFT", "SEGMENT_M", "Road", "RoadNetwork"]
 
@@ -57,6 +57,7 @@ class RoadNetwork:
     def __init__(self, regions, seed=None):
         self.regions = regions
         self.seed = regions.seed if seed is None else int(seed)
+        self.min_junction_deg = regions.spec.roads.min_junction_deg
         self._graphs, self._cells = OrderedDict(), OrderedDict()
         self._roads, self._segs = {}, {}
         self._reach = max(0.5 * b.roads.width_m + b.roads.shoulder_m for b in regions.biomes)
@@ -82,7 +83,7 @@ class RoadNetwork:
     def graph(self, ci, cj):
         """layout.Graph of super-cell (ci, cj)."""
         def make():
-            g = layout.grow(self.regions, self.seed, ci, cj)
+            g = layout.grow(self.regions, self.seed, ci, cj, self.min_junction_deg)
             log.info("super-cell (%d, %d): %d nodes (%d grid), %d edges in %.0f ms",
                      ci, cj, len(g.x), int(g.grid.sum()), len(g.edges), g.ms)
             return g
@@ -97,7 +98,7 @@ class RoadNetwork:
             for axis, nb in ((0, (ci + 1, cj)), (1, (ci, cj + 1))):
                 pairs += [((ci, cj, a), (*nb, b)) for a, b in
                           layout.stitch(ga, self.graph(*nb), axis, nb[axis] * SUPER_M,
-                                       self.seed)]
+                                       self.seed, self.min_junction_deg)]
             tiles, r = {}, self._reach
             for ra, rb in pairs:
                 ra, rb = min(ra, rb), max(ra, rb)

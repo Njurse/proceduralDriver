@@ -1,4 +1,4 @@
-"""Basic traffic: kinematic cars on world.roads.lanes paths.
+"""Basic traffic: kinematic cars on worldgen.roads.lanes paths.
 
 Up to config.TRAFFIC_MAX cars appear on lanes a ring round the player,
 drive at a cruising speed, ease off for sharp turns at junctions, slow and
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 
 import config
-from world.roads.lanes import LaneMap, connector
+from worldgen.roads.lanes import LaneMap, connector
 
 log = logging.getLogger(__name__)
 

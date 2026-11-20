@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-from world.roads.layout import apex
+from worldgen.roads.layout import apex
 
 SEGMENT_M = 4.0
 SMOOTH_WINDOW_M = 48.0
