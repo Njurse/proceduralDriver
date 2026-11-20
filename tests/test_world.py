@@ -1,6 +1,7 @@
 """Biomes (world/biomes.py), regions (world/regions.py) and roads
-(world/roads.py) as one drivable World (world/world.py)."""
+(world/roads) as one drivable World (world/world.py)."""
 
+import dataclasses
 import math
 import os
 import sys
@@ -18,7 +19,7 @@ from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
 from world.biomes import load_biome, load_biomes, parse_biome  # noqa: E402
 from world.chunks import chunk_mesh, terrain_colors  # noqa: E402
 from world.ground import Ground  # noqa: E402
-from world.roads import MARKING_LIFT  # noqa: E402
+from world.roads import MARKING_LIFT, layout  # noqa: E402
 from world.world import World  # noqa: E402
 
 DT = 1.0 / 60.0
@@ -259,6 +260,58 @@ def test_off_road_is_offroad(world):
             assert world(x + dx, z + dz)[2] == SURFACE_OFFROAD
 
 
+def _two_biomes(**village):
+    """A world of village and jungle (organic) only, village roads changed."""
+    bs = {b.name: b for b in load_biomes()}
+    v = dataclasses.replace(bs["village"],
+                            roads=dataclasses.replace(bs["village"].roads, **village))
+    return World(biomes=[v, bs["jungle"]])
+
+
+def _supercell(w, biome):
+    site = w.regions.site_of(biome)
+    return tuple(math.floor(c / layout.SUPER_M) for c in site)
+
+
+def test_a_full_grid_runs_along_the_region_heading():
+    w = _two_biomes(grid=1.0, grid_heading_deg=30.0)
+    g = w.roads.graph(*_supercell(w, "village"))
+    off = [abs((math.degrees(math.atan2(g.z[b] - g.z[a], g.x[b] - g.x[a])) - 30.0 + 45.0)
+               % 90.0 - 45.0) for a, b in g.edges if min(g.g[a], g.g[b]) > 0.99]
+    assert len(off) > 40
+    assert np.mean(np.array(off) < 3.0) > 0.8
+
+
+def test_no_grid_is_the_organic_network_whatever_the_heading():
+    a = _two_biomes(grid=0.0, grid_heading_deg=0.0)
+    b = _two_biomes(grid=0.0, grid_heading_deg=45.0)
+    for cell in [(0, 0), _supercell(a, "village")]:
+        ga, gb = a.roads.graph(*cell), b.roads.graph(*cell)
+        assert not ga.grid.any() and ga.edges == gb.edges
+        np.testing.assert_array_equal(ga.x, gb.x)
+
+
+def test_grid_blends_smoothly_and_roads_stay_connected():
+    w = _two_biomes(grid=1.0)
+    p = np.array(w.regions.site_of("village"))
+    q = np.array(w.regions.site_of("jungle", near=tuple(p)))
+    t = np.linspace(0.0, 1.0, 400)[:, None]
+    line = p + t * (q - p)
+    g, _, _ = layout.field(w.regions, line[:, 0], line[:, 1])
+    assert g[0] > 0.99 and g[-1] < 0.01
+    assert np.abs(np.diff(g)).max() < 0.05     # steps of a few metres: no jumps
+    gr = w.roads.graph(*_supercell(w, "village"))
+    parent = list(range(len(gr.x)))
+
+    def root(a):
+        while parent[a] != a:
+            a = parent[a]
+        return a
+    for a, b in gr.edges:
+        parent[root(a)] = root(b)
+    assert len({root(a) for a in range(len(gr.x))}) == 1   # one network
+
+
 # -------------------------------------------------------------------- car
 def _drive(world, x, z, heading, steer_fn, throttle_fn, ticks):
     v = Vehicle(load_cosmetics())
@@ -288,13 +341,14 @@ def _start(world, biome):
 @pytest.mark.parametrize("biome", [None, *config.WORLD_BIOMES[2:]])
 def test_car_follows_the_roads_for_25_seconds(world, biome):
     x, z, heading = _start(world, biome)
-    cruise = 16.0 if biome == "jungle" else 22.0  # narrow twisty lanes: ~58 km/h
+    cruise = 15.0  # 54 km/h: 7-12 m roads with real junction corners
     dist, on_road = _drive(
         world, x, z, heading,
         lambda v, f: world.road_steer(v.pos[0], v.pos[2], v.heading),
         lambda v: 1.0 if np.linalg.norm(v.vel) < cruise else 0.0, round(25.0 / DT))
     assert dist > 250.0
-    assert on_road > 0.9, f"on the road {on_road:.0%} of the time"
+    # the autopilot cuts junction corners and turns round at dead ends
+    assert on_road > 0.85, f"on the road {on_road:.0%} of the time"
 
 
 @pytest.mark.parametrize("biome, turn", [(None, math.pi / 2), (None, -math.pi / 2),

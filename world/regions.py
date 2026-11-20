@@ -170,6 +170,25 @@ class Regions(SampledGround):
         wn = w / total
         return wn, (wx - wn * tx) / total, (wz - wn * tz) / total
 
+    def site_mean(self, x, z, values):
+        """Per point, the mean of per-site ``values(pos (k, 2), biome (k,))``
+        -> (k, m), weighted like the terrain blend (no gradients): (n, m)."""
+        x, z = np.atleast_1d(np.asarray(x, float)), np.atleast_1d(np.asarray(z, float))
+        ci = np.floor(x / self.scale_m).astype(np.int64)
+        cj = np.floor(z / self.scale_m).astype(np.int64)
+        out = None
+        for cell in np.unique(np.stack([ci, cj], axis=1), axis=0):
+            m = np.nonzero((ci == cell[0]) & (cj == cell[1]))[0]
+            pos, owner, _ = self._sites(int(cell[0]), int(cell[1]))
+            d = np.hypot(x[m, None] - pos[None, :, 0], z[m, None] - pos[None, :, 1])
+            t = np.clip((d - d.min(axis=1, keepdims=True)) / self.band_m, 0.0, 1.0)
+            f = 1.0 - t * t * (3.0 - 2.0 * t)
+            v = values(pos, owner)
+            if out is None:
+                out = np.zeros((len(x), v.shape[1]))
+            out[m] = f @ v / f.sum(axis=1, keepdims=True)
+        return out
+
     def biome_index(self, x, z):
         """Index of the biome weighted most at each point (array)."""
         return np.argmax(self.weights(x, z)[0], axis=1)

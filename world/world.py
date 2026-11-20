@@ -31,12 +31,7 @@ class World(SampledGround):
         h, hx, hz = self.regions.sample(x, z)
         if np.ndim(x) == 0 and np.ndim(z) == 0:
             x, z = float(x), float(z)
-            roads = self.roads.roads_near(x, z, x, z)
-            if not roads:
-                return h, hx, hz, False
-            out = self.roads.blend(roads, np.array([x]), np.array([z]), np.array([h]),
-                                   np.array([hx]), np.array([hz]))
-            return float(out[0][0]), float(out[1][0]), float(out[2][0]), bool(out[3][0])
+            return self.roads.query_point(x, z, h, hx, hz)
         x, z = np.broadcast_arrays(np.asarray(x, float), np.asarray(z, float))
         shape = x.shape
         x, z = x.ravel(), z.ravel()

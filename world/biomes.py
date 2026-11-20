@@ -6,7 +6,7 @@ below:
 
 ``terrain``  the biome's height field (world.terrain.Terrain: fbm, ridged
              or terraced noise) and the colour ramp its chunks are painted with
-``roads``    the jittered road grid the biome grows (world.roads), with
+``roads``    the roads the biome grows (world.roads), with
              optional dashed centre ``markings``
 ``weight``   (top level) how often world.regions picks the biome for a region
 
@@ -72,6 +72,8 @@ class RoadRules:
     color: RGB = (0.30, 0.30, 0.32)
     flatten: bool = True             # cut/fill the terrain to the road's profile
     markings: RGB | None = None      # dashed centre line colour, or none
+    grid: float = 0.0                # 0 organic roads .. 1 a city grid
+    grid_heading_deg: float | None = None  # grid heading; none: random per region
 
 
 @dataclass(frozen=True)
@@ -101,8 +103,11 @@ _LIMITS = {
     "terrace_steps": (2, 24),
     "terrace_ramp": (0.1, 0.9),
     "weight": (0.0, 100.0),
+    "grid": (0.0, 1.0),
+    "grid_heading_deg": (-360.0, 360.0),
 }
 _OPTIONAL_RGB = {"markings"}
+_OPTIONAL_NUMBER = {"grid_heading_deg"}
 
 
 def _is_number(v):
@@ -113,6 +118,8 @@ def _value(where, key, raw, default):
     """``raw`` checked against the type of ``default`` and _LIMITS[key]."""
     if key in _OPTIONAL_RGB and (raw is None or default is None):
         return None if raw is None else _value(where, key, raw, (0.0, 0.0, 0.0))
+    if key in _OPTIONAL_NUMBER and (raw is None or default is None):
+        return None if raw is None else _value(where, key, raw, 0.0)
     if isinstance(default, bool):
         if not isinstance(raw, bool):
             raise ValueError(f"{where}.{key}: expected true or false, got {raw!r}")
