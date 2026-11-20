@@ -150,6 +150,11 @@ class AudioManager:
         pcm = (out * 32767.0).astype(np.int16)
         return pygame.sndarray.make_sound(np.ascontiguousarray(np.stack((pcm, pcm), axis=1)))
 
+    def set_paused(self, paused):
+        """Hold the engine loop where it is (pause menu) or let it go on."""
+        if self.channel is not None:
+            (self.channel.pause if paused else self.channel.unpause)()
+
     def shutdown(self):
         if self.channel is None:
             return

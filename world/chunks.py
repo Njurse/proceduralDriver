@@ -200,6 +200,13 @@ class ChunkStreamer:
                           else builds_per_frame)
         self.loaded = {}
 
+    def reset(self, terrain):
+        """Drop every chunk and stream ``terrain`` from now on (new seed)."""
+        for node in self.loaded.values():
+            node.removeNode()
+        self.loaded.clear()
+        self.terrain = terrain
+
     def update(self, x, z, budget=None):
         """Build up to ``budget`` (default TERRAIN_BUILDS_PER_FRAME) missing
         chunks, nearest first, and drop chunks more than radius + 1 away.

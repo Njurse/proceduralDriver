@@ -47,16 +47,18 @@ from panda3d.core import (
 )
 
 import config
-from core.car_profile import load_cosmetics
 from core.gamepad import Gamepad
 from core.orbit_camera import OrbitCamera, orbit_offset
-from core.redriver2_physics import Input, PhysicsWorld, Vehicle
+from core.redriver2_physics import Input
 from core.textures import NEAREST_PRC, _to_texture, load_color_keyed, seamless_fbm, use_nearest
 from core.units import DR2_UNITS_PER_METRE
 from core.vehicle_audio import AudioManager, sound_input
+from ui.minimap import Minimap
+from ui.pause import APPLY_SEED, CONTINUE, EXIT, EXPORT, RESTART, PauseMenu
 from world.chunks import ChunkStreamer, detail_texture, road_detail_texture
+from world.session import Session
 from world.sky import build_sky
-from world.world import World
+from world.worldmap import export_world
 
 log = logging.getLogger("main")
 
@@ -172,14 +174,13 @@ class DriveSim(ShowBase):
         self.camLens.setNearFar(CAMERA_NEAR_M, config.DRAW_DISTANCE_M)
         self.clock = ClockObject.getGlobalClock()
 
-        self.cos = load_cosmetics()
-        self.vehicle = Vehicle(self.cos)
-        self.terrain = World()   # biome regions with roads (world/world.py)
-        x, z, heading = self.terrain.spawn()
-        self.vehicle.reset(x, z, heading, ground=self.terrain)
-        self.physics = PhysicsWorld()
-        self.physics.add(self.vehicle)
+        # world, car, discovery and the save file (world/session.py)
+        self.session = Session(save_path=options.get("save_path"), seed=options.get("seed"),
+                               new=options.get("new", False))
+        self.cos = self.session.cos
         self.input = Input()
+        self._pad_prev = {}
+        self._stick_prev = 0
         offscreen = options.get("window_type") == "offscreen"
         # XInput reads the controller whether or not the window has focus, so
         # offscreen runs ignore it: a held trigger made --shots runs differ.
@@ -208,6 +209,23 @@ class DriveSim(ShowBase):
         self.cam_side = 0.0
 
         self.taskMgr.add(self._update, "drive-update")
+
+    # The session swaps the world on a seed change, so these always follow it.
+    @property
+    def vehicle(self):
+        return self.session.vehicle
+
+    @property
+    def physics(self):
+        return self.session.physics
+
+    @property
+    def terrain(self):
+        return self.session.world
+
+    @property
+    def paused(self):
+        return self.session.paused
 
     # ------------------------------------------------------------ setup
     def _setup_window(self):
@@ -395,7 +413,16 @@ class DriveSim(ShowBase):
                            ("o", "key_cam_latch")]:
             self.accept(name, self._set_key, [flag, True])
             self.accept(name + "-up", self._set_key, [flag, False])
-        self.accept("escape", self._quit)
+        self.accept("escape", self._escape)
+        for key, fn in [("arrow_up", lambda: self._menu_move(-1)),
+                        ("arrow_down", lambda: self._menu_move(1)),
+                        ("arrow_left", lambda: self._menu_adjust(-1)),
+                        ("arrow_right", lambda: self._menu_adjust(1)),
+                        ("enter", self._menu_activate), ("backspace", self._menu_backspace),
+                        ("m", self.minimap.toggle_zoom)]:
+            self.accept(key, fn)
+        for d in "0123456789":
+            self.accept(d, self._menu_type, [d])
 
     def _bind_window_events(self):
         # Shut the audio down cleanly when the window's X is used.
@@ -409,6 +436,118 @@ class DriveSim(ShowBase):
 
     def _set_key(self, flag, value):
         setattr(self, flag, value)
+        if value and self.paused:   # W/S/A/D/space work the menu while paused
+            {"key_throttle": lambda: self._menu_move(-1),
+             "key_brake": lambda: self._menu_move(1),
+             "key_left": lambda: self._menu_adjust(-1),
+             "key_right": lambda: self._menu_adjust(1),
+             "key_hb": self._menu_activate}.get(flag, lambda: None)()
+
+    # ------------------------------------------------------------- pause
+    def set_paused(self, paused):
+        """Freeze physics and the engine sound and show the menu (saving)."""
+        if paused == self.paused:
+            return
+        self.session.set_paused(paused)
+        self.pause_menu.set_visible(paused)
+        with contextlib.suppress(Exception):
+            self.audio.set_paused(paused)
+
+    def _escape(self):
+        if not self.paused:
+            self.set_paused(True)
+        elif self.pause_menu.back():
+            self.set_paused(False)
+
+    def _menu_move(self, d):
+        if self.paused:
+            self.pause_menu.move(d)
+
+    def _menu_adjust(self, d):
+        if self.paused:
+            self.pause_menu.adjust(d)
+
+    def _menu_type(self, ch):
+        if self.paused:
+            self.pause_menu.type_char(ch)
+
+    def _menu_backspace(self):
+        if self.paused:
+            self.pause_menu.backspace()
+
+    def _menu_activate(self):
+        if self.paused:
+            self.menu_action(self.pause_menu.activate())
+
+    def menu_action(self, action):
+        """Carry out what the pause menu chose."""
+        if action == CONTINUE:
+            self.set_paused(False)
+        elif action == RESTART:
+            self.session.restart()
+            self._after_respawn()
+            self.set_paused(False)
+        elif action == EXPORT:
+            try:
+                path, (w, h) = export_world(self.terrain, self.session.explorer.discovered)
+                self.pause_menu.set_status(f"Saved {path} ({w} x {h})")
+                log.info("[export] %s (%d x %d)", path, w, h)
+            except Exception as exc:
+                self.pause_menu.set_status(f"Export failed: {exc}")
+                log.warning("[export] %s", exc)
+        elif action == EXIT:
+            self._quit()
+        elif isinstance(action, tuple) and action[0] == APPLY_SEED:
+            self.session.change_seed(action[1])
+            self.chunks.reset(self.terrain)
+            self.minimap.set_world(self.terrain)
+            self._after_respawn()
+            self.pause_menu.set_status(f"New world: seed {action[1]}")
+
+    def _after_respawn(self):
+        v = self.vehicle
+        self.chunks.update(v.pos[0], v.pos[2], budget=(2 * self.chunks.radius + 1) ** 2)
+        self.orbit = OrbitCamera()
+        self.cam_vert = self.cam_side = 0.0
+        self._sync_car(0.0)
+        self._update_chase_cam(1.0 / 60.0)
+
+    def _pad_menu(self):
+        """Gamepad edges: Start pauses, Back zooms the map; in the menu the
+        d-pad / left stick move, A selects, B goes back."""
+        pad = self.pad
+        if not pad.connected:
+            return
+        now = {"start": pad.start_button, "back": pad.map_button, "a": pad.a_button,
+               "b": pad.brake, "up": pad.dpad_up, "down": pad.dpad_down,
+               "left": pad.dpad_left, "right": pad.dpad_right}
+        hit = {k for k, v in now.items() if v and not self._pad_prev.get(k)}
+        self._pad_prev = now
+        # XInput reports the stick up-positive, SDL down-positive
+        y = pad.left_y * (-1.0 if pad.backend == "xinput" else 1.0)
+        stick = (y > 0.6) - (y < -0.6)
+        if stick and stick != self._stick_prev:
+            hit.add("down" if stick > 0 else "up")
+        self._stick_prev = stick
+        if "back" in hit:
+            self.minimap.toggle_zoom()
+        if "start" in hit:
+            self.set_paused(not self.paused)
+            return
+        if not self.paused:
+            return
+        if "up" in hit:
+            self.pause_menu.move(-1)
+        if "down" in hit:
+            self.pause_menu.move(1)
+        if "left" in hit:
+            self.pause_menu.adjust(-1)
+        if "right" in hit:
+            self.pause_menu.adjust(1)
+        if "a" in hit:
+            self.menu_action(self.pause_menu.activate())
+        elif "b" in hit and self.pause_menu.back():
+            self.set_paused(False)
 
     def _quit(self):
         self._on_exit()
@@ -418,6 +557,10 @@ class DriveSim(ShowBase):
         if self._exited:
             return
         self._exited = True
+        try:
+            self.session.save()
+        except Exception as exc:
+            log.warning("[save] %s", exc)
         try:
             self.audio.shutdown()
         except Exception as exc:
@@ -432,6 +575,9 @@ class DriveSim(ShowBase):
         self.state_label = OnscreenText(
             text="", pos=(-0.72, -0.93), scale=0.07,
             fg=(1, 1, 1, 1), align=2, shadow=(0, 0, 0, 0.6))
+        self.minimap = Minimap(self, self.terrain)
+        self.pause_menu = PauseMenu(self, lambda: self.session.seed,
+                                    lambda: len(self.session.explorer.discovered))
 
     # ------------------------------------------------------------- frame
     def _update(self, task):
@@ -448,6 +594,9 @@ class DriveSim(ShowBase):
         handbrake = self.key_hb
         fast = self.key_fast
         self.pad.poll()
+        self._pad_menu()
+        if self.paused:
+            return task.cont
         if self.pad.connected:
             throttle = max(throttle, self.pad.right_trigger)
             brake = max(brake, self.pad.left_trigger)
@@ -466,14 +615,15 @@ class DriveSim(ShowBase):
         inp.handbrake = handbrake
         inp.fast_steer = fast
         inp.analog = self.pad.connected and abs(self.pad.left_x) > 0.0
-        v.process_input(inp)
-        self.physics.step(dt)
+        self.session.step(inp, dt)
         self.chunks.update(v.pos[0], v.pos[2])
 
         self._sync_car(dt)
         self._update_chase_cam(dt)
         self._update_hud()
         self._update_audio(dt)
+        self.minimap.update((v.pos[0], v.pos[2]), v.heading,
+                            self.session.explorer.discovered, self.chunks.loaded)
         return task.cont
 
     def _sync_car(self, dt):
@@ -546,8 +696,7 @@ class DriveSim(ShowBase):
             log.debug("[audio] %s", exc)
 
     def destroy(self):
-        with contextlib.suppress(Exception):
-            self.audio.shutdown()
+        self._on_exit()   # saves (when saving is on) and stops the audio
         super().destroy()
 
 
@@ -572,6 +721,7 @@ def take_shots(game, out_dir):
     game.autopilot = lambda v: t.road_steer(v.pos[0], v.pos[2], v.heading)
     run(150)  # 2.5 s of gas down the road, ~80 km/h
     _save_shot(game, os.path.join(out_dir, "road_chase.png"))
+    _save_shot(game, os.path.join(out_dir, "minimap_chase.png"))
     sky_chase(game)
     _save_shot(game, os.path.join(out_dir, "sky_chase.png"))
     for name, deg in SHOTS:
@@ -607,6 +757,23 @@ def take_shots(game, out_dir):
 
     biome_border(game)
     _save_shot(game, os.path.join(out_dir, "biome_border.png"))
+
+    # the pause menu over the chase view, then the world export
+    game.camLens.setNearFar(CAMERA_NEAR_M, config.DRAW_DISTANCE_M)
+    game._update_chase_cam(1.0 / 60.0)
+    game.set_paused(True)
+    run(3)
+    _save_shot(game, os.path.join(out_dir, "pause_menu.png"))
+    game.minimap.toggle_zoom()
+    game.minimap.update((game.vehicle.pos[0], game.vehicle.pos[2]), game.vehicle.heading,
+                        game.session.explorer.discovered, game.chunks.loaded, force=True)
+    game.pause_menu.set_visible(False)
+    _save_shot(game, os.path.join(out_dir, "minimap_far.png"))
+    path, size = export_world(game.terrain, game.session.explorer.discovered,
+                              os.path.join(out_dir, "world_export.png"))
+    log.info("[shots] exported %s %s", path, size)
+    game.set_paused(False)
+    game.minimap.toggle_zoom()
     overhead(game)
     _save_shot(game, os.path.join(out_dir, "roads_overview.png"))
 
@@ -664,6 +831,13 @@ def main():
                     help="fix the camera orbit angle (0 chase, -90 left, 90 right, 180 front)")
     ap.add_argument("--shots", metavar="DIR",
                     help="save camera test screenshots to DIR (implies --offscreen)")
+    ap.add_argument("--seed", type=int, default=None,
+                    help="world seed (a save for another seed is left alone)")
+    ap.add_argument("--new", action="store_true",
+                    help="ignore the save and start a fresh world (random seed unless --seed)")
+    ap.add_argument("--save", metavar="PATH", default=None,
+                    help=f"save file (default {config.SAVE_PATH}; offscreen runs save "
+                         "only when this is given)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -672,7 +846,9 @@ def main():
     if args.shots:
         args.offscreen = True
         loadPrcFileData("", "win-size 960 540")
-    options = {"window_type": "offscreen" if args.offscreen else "onscreen"}
+    options = {"window_type": "offscreen" if args.offscreen else "onscreen",
+               "seed": args.seed, "new": args.new,
+               "save_path": args.save or (None if args.offscreen else config.SAVE_PATH)}
     if args.cam_heading is not None:
         options["cam_heading"] = math.radians(args.cam_heading)
     game = DriveSim(options)
