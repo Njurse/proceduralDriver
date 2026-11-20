@@ -21,9 +21,9 @@ from pathlib import Path
 import config
 from core.car_profile import load_cosmetics
 from core.redriver2_physics import PhysicsWorld, Vehicle
-from world.chunks import chunks_around
 from world.save import SaveState, free_path, read_save, write_save
 from world.world import World
+from worldgen.chunk import chunks_around
 
 log = logging.getLogger(__name__)
 

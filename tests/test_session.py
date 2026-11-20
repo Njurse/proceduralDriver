@@ -13,10 +13,10 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config  # noqa: E402
-from world.chunks import chunk_mesh  # noqa: E402
 from world.save import SaveState, encode_chunks, read_save, write_save  # noqa: E402
 from world.session import Session  # noqa: E402
 from world.worldmap import TileCache, chunk_tile, export_world, minimap_image  # noqa: E402
+from worldgen.chunk import chunk_mesh  # noqa: E402
 
 DT = 1.0 / 60.0
 SIZE = config.TERRAIN_CHUNK_SIZE

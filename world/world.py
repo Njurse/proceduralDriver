@@ -11,8 +11,8 @@ import math
 import numpy as np
 
 import config
-from world.chunks import ChunkMesh
 from world.spec import world_spec
+from worldgen.chunk import ChunkMesh
 from worldgen.ground import SURFACE_OFFROAD, SURFACE_ROAD, SampledGround
 from worldgen.regions import Regions
 from worldgen.roads import RoadNetwork

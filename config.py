@@ -18,7 +18,7 @@ CAR_MODEL_INVERT_VERTICAL = False
 HAVANA_HANDLING_JSON = (ASSETS / "vehicle" / "havana_model0" / "handling.json").as_posix()
 HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.obj").as_posix()
 
-# Procedural terrain (world/terrain.py, world/chunks.py) --------------------
+# Procedural terrain (worldgen/, game/world_view.py) --------------------
 # Rolling hills: Perlin fBm, height = AMPLITUDE * fbm(x / SCALE, z / SCALE).
 TERRAIN_SEED = 1977
 TERRAIN_CHUNK_SIZE = 64.0       # metres per square chunk

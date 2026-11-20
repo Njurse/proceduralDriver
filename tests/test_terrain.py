@@ -1,4 +1,4 @@
-"""The procedural terrain (world/terrain.py) and its chunk meshes (world/chunks.py)."""
+"""The procedural terrain (worldgen/height.py) and its chunk meshes (worldgen/chunk.py)."""
 
 import math
 import os
@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
 from core.car_profile import load_cosmetics  # noqa: E402
 from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
-from world.chunks import ChunkStreamer, chunk_mesh, chunks_around  # noqa: E402
+from game.world_view import ChunkStreamer  # noqa: E402
+from worldgen.chunk import chunk_mesh, chunks_around  # noqa: E402
 from worldgen.ground import Ground  # noqa: E402
 from worldgen.height import Terrain  # noqa: E402
 

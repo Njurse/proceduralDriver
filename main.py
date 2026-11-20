@@ -39,9 +39,9 @@ from game.chase_camera import CAMERA_NEAR_M, ChaseCamera
 from game.controls import Controls, _NoPad
 from game.shots import take_shots
 from game.traffic_view import TrafficDraw
+from game.world_view import ChunkStreamer, detail_texture, road_detail_texture
 from ui.minimap import Minimap
 from ui.pause import APPLY_SEED, CONTINUE, EXIT, EXPORT, RESTART, PauseMenu
-from world.chunks import ChunkStreamer, detail_texture, road_detail_texture
 from world.session import Session
 from world.sky import build_sky
 from world.worldmap import export_world
@@ -126,7 +126,7 @@ class DriveSim(Controls, ChaseCamera, CarView, TrafficDraw, ShowBase):
             log.debug("[window] %s", exc)
 
     def _build_world(self):
-        # Endless terrain: chunk meshes streamed round the car (world/chunks.py),
+        # Endless terrain: chunk meshes streamed round the car (game/world_view.py),
         # vertex-coloured by height and slope over a tiled detail texture.
         self.chunks = ChunkStreamer(self.terrain, self.render,
                                     detail_texture(self.terrain.detail_texture),

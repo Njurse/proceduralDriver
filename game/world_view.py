@@ -1,16 +1,15 @@
-"""Streams the terrain as square chunk meshes round the car.
+"""The world in Panda3D: streams worldgen chunk meshes round the car.
 
-``chunk_mesh`` is pure numpy (tested without Panda); ``ChunkStreamer`` turns
-meshes into Panda3D GeomNodes, building the nearest missing chunks first and
-dropping chunks that fall out of range.  A ground with a ``road_mesh(ci, ck)``
-(world.world.World) gets its road strips added to each chunk.  Chunk (i, k) covers physics x in
-[i * size, (i + 1) * size] and z in [k * size, (k + 1) * size].
+``ChunkStreamer`` turns worldgen.chunk meshes into GeomNodes, building the
+nearest missing chunks first and dropping chunks that fall out of range.  A
+ground with a ``road_mesh(ci, ck)`` (world.world.World) gets its road strips
+added to each chunk.  The detail textures that modulate the vertex colours
+live here too.
 """
 
 import logging
 import math
 import time
-from dataclasses import dataclass
 
 import numpy as np
 from panda3d.core import (
@@ -28,62 +27,9 @@ from panda3d.core import (
 import config
 from core.noise import fbm_2d
 from core.textures import _to_texture
-from worldgen.palette import terrain_colors
+from worldgen.chunk import chunk_mesh, chunks_around
 
 log = logging.getLogger(__name__)
-
-DETAIL_TILE_M = 8.0      # metres per repeat of the detail texture
-
-@dataclass
-class ChunkMesh:
-    """Vertices in physics coordinates (x, y up, z)."""
-
-    pos: np.ndarray      # (n, 3)
-    normal: np.ndarray   # (n, 3)
-    color: np.ndarray    # (n, 4)
-    uv: np.ndarray       # (n, 2)
-    tris: np.ndarray     # (m, 3) vertex indices
-
-
-def chunk_mesh(terrain, ci, ck, size=None, res=None):
-    """Grid mesh of chunk (ci, ck): (res + 1)^2 vertices, 2 res^2 triangles.
-
-    Vertex x/z are computed as (chunk * res + index) * step so neighbouring
-    chunks produce bit-identical edge vertices.
-    """
-    size = float(config.TERRAIN_CHUNK_SIZE if size is None else size)
-    res = int(config.TERRAIN_CHUNK_RES if res is None else res)
-    step = size / res
-    idx = np.arange(res + 1)
-    gx, gz = np.meshgrid((ci * res + idx) * step, (ck * res + idx) * step)
-    x, z = gx.ravel(), gz.ravel()
-    h, dhx, dhz = terrain.sample(x, z)
-    n = np.stack([-dhx, np.ones_like(h), -dhz], axis=-1)
-    n /= np.linalg.norm(n, axis=-1, keepdims=True)
-    pos = np.stack([x, h, z], axis=-1)
-    if hasattr(terrain, "colors"):  # biome-aware grounds paint themselves
-        color = terrain.colors(x, z, h, n)
-    else:
-        color = terrain_colors(h, n, terrain.amplitude)
-    tile = getattr(terrain, "detail_tile_m", DETAIL_TILE_M)
-
-    row = res + 1
-    q = (np.arange(res)[:, None] * row + np.arange(res)[None, :]).ravel()
-    # two triangles per quad, counter-clockwise seen from above in Panda's
-    # (x, y = physics z, z up) frame, so the top faces survive back-face culling
-    tris = np.concatenate([np.stack([q, q + 1, q + row], axis=-1),
-                           np.stack([q + 1, q + row + 1, q + row], axis=-1)])
-    return ChunkMesh(pos=pos, normal=n, color=color,
-                     uv=np.stack([x, z], axis=-1) / tile, tris=tris)
-
-
-def chunks_around(x, z, radius, size=None):
-    """Chunk keys within ``radius`` chunks of the one under (x, z), nearest first."""
-    size = float(config.TERRAIN_CHUNK_SIZE if size is None else size)
-    ci, ck = math.floor(x / size), math.floor(z / size)
-    keys = [(ci + di, ck + dk) for di in range(-radius, radius + 1)
-            for dk in range(-radius, radius + 1)]
-    return sorted(keys, key=lambda k: (k[0] - ci) ** 2 + (k[1] - ck) ** 2)
 
 
 def _noise_tile(size, seed, frequency, lo, hi):
@@ -206,7 +152,7 @@ class ChunkStreamer:
             roads.prefetch(x, z, (self.radius + 1) * config.TERRAIN_CHUNK_SIZE)
         has_roads = hasattr(self.terrain, "road_mesh")
         built, left = 0, False
-        for key in chunks_around(x, z, self.radius):
+        for key in chunks_around(x, z, self.radius, config.TERRAIN_CHUNK_SIZE):
             fresh = key not in self.loaded
             if not fresh and key not in self._roadless:
                 continue
@@ -217,7 +163,8 @@ class ChunkStreamer:
             if fresh:
                 name = f"chunk_{key[0]}_{key[1]}"
                 self.loaded[key] = self.root.attachNewNode(
-                    mesh_node(chunk_mesh(self.terrain, *key), name))
+                    mesh_node(chunk_mesh(self.terrain, *key, config.TERRAIN_CHUNK_SIZE,
+                                         config.TERRAIN_CHUNK_RES), name))
                 self._batch[0] += 1
                 if has_roads:
                     self._roadless.add(key)
