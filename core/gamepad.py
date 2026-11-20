@@ -9,7 +9,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 from core.mathutil import clamp
 
-log = logging.getLogger("galaxy_explorer.gamepad")
+log = logging.getLogger("gamepad")
 
 _AXIS_LEFT_X = 0
 _AXIS_LEFT_Y = 1

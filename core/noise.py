@@ -60,24 +60,3 @@ def fbm_2d(x, y, seed=0, octaves=5, persistence=0.5, lacunarity=2.0,
         frequency *= lacunarity
     return total / max(norm, 1e-9)
 
-
-def terrain_height(x, y, seed, params):
-    """Height in world units for a planet's terrain.
-
-    `params` is a mapping with scale, amplitude, octaves, persistence and
-    ridge. Works on scalars and numpy arrays alike.
-    """
-    scale = float(params.get("scale", 0.0016))
-    amplitude = float(params.get("amplitude", 210.0))
-    octaves = int(params.get("octaves", 5))
-    persistence = float(params.get("persistence", 0.5))
-    ridge = float(params.get("ridge", 0.45))
-
-    base = fbm_2d(x * scale, y * scale, seed, octaves, persistence)
-    ridged = fbm_2d(x * scale * 0.62 + 80.0, y * scale * 0.62 - 40.0,
-                    seed + 911, octaves, persistence, ridged=True)
-    continents = fbm_2d(x * scale * 0.23, y * scale * 0.23, seed + 37, 3, 0.55)
-
-    n = base * (1.0 - ridge) + ridged * ridge
-    n = n * 0.72 + continents * 0.28
-    return (n - 0.5) * amplitude
