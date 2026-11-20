@@ -1,41 +1,38 @@
-"""REDRIVER2 vehicle dynamics port (simplified but drivable).
+"""REDRIVER2 vehicle dynamics port (work in progress).
 
-Mirrors the structures/flow from PORTING_NOTES.md section 4.  Exact per-wheel
-force parity with AddWheelForcesDriver1 is NOT yet achieved (C source not in
-repo); provisional slip values are used (marked TODO).  Tunable via config.py.
+Pad and grip rules are the Driver 2 ones (core.physics_helpers:
+ProcessCarPad, GetFrictionScalesDriver1).  The force/integration step below
+is still a provisional float model; AddWheelForcesDriver1, StepOneCar and
+GlobalTimeStep are the next ports.  Tunable via config.py.
 """
 
 import math
-try:
-    import config
-except ModuleNotFoundError:
-    import sys, os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    import config
-from core.fixedpoint import (ONE, FIXED, FIXEDH, RSIN, RCOS, clamp, Vec3)
-from core.track import surface_at
-try:
-    from core.physics_helpers import (steering_update, auto_brake_update,
-                                     thrust_from_input, friction_scales,
-                                     STEER_MAX)
-except Exception:
-    from physics_helpers import (steering_update, auto_brake_update,
-                                 thrust_from_input, friction_scales,
-                                 STEER_MAX)
 
+import config
+from core.fixedpoint import ONE, Vec3
+from core.physics_helpers import (
+    CAR_PAD_ACCEL,
+    CAR_PAD_BRAKE,
+    CAR_PAD_FASTSTEER,
+    CAR_PAD_HANDBRAKE,
+    CAR_PAD_LEFT,
+    CAR_PAD_RIGHT,
+    CAR_PAD_WHEELSPIN,
+    FS_TOTAL,
+    STEER_CAP_FAST,
+    PadState,
+    get_friction_scales_driver1,
+    process_car_pad,
+)
 
-class HandlingType:
-    def __init__(self):
-        self.friction_scale_ratio = 32
-        self.aggressive_braking = 1
-        self.four_wheel_drive = 0
-        self.auto_brake_on = 1
+STEER_DEADZONE = 0.05
+BRAKE_THRESHOLD = 0.1
 
 
 class Wheel:
     def __init__(self):
         self.sus_compression = 0
-        self.locked = 0
+        self.locked = False
         self.on_grass = 0
         self.surface = 0
         self.world_pos = (0, 0, 0)
@@ -45,44 +42,78 @@ class Wheel:
         self.texture_fast = False
 
 
+def pad_from_input(inp) -> int:
+    """Map a float input snapshot (keyboard/gamepad) to CAR_PAD_* bits."""
+    steer = float(getattr(inp, "steer", 0.0))
+    pad = 0
+    if steer > STEER_DEADZONE:
+        pad |= CAR_PAD_RIGHT
+    elif steer < -STEER_DEADZONE:
+        pad |= CAR_PAD_LEFT
+    if getattr(inp, "fast_steer", False):
+        pad |= CAR_PAD_FASTSTEER
+    if float(getattr(inp, "throttle", 0.0)) > 0.0:
+        pad |= CAR_PAD_ACCEL
+    if float(getattr(inp, "brake", 0.0)) > BRAKE_THRESHOLD:
+        pad |= CAR_PAD_BRAKE
+    if getattr(inp, "handbrake", False):
+        pad |= CAR_PAD_HANDBRAKE
+    if getattr(inp, "wheelspin", False):
+        pad |= CAR_PAD_WHEELSPIN
+    return pad
+
+
 class Vehicle:
-    def __init__(self, cosmetics, handling_type=None):
+    def __init__(self, cosmetics, hnd_type: int = 0):
         self.cos = cosmetics
-        self.handling = handling_type or HandlingType()
-        self.position = Vec3(0, 0, 0)
-        self.orientation = 0
-        self.angular_velocity = Vec3(0, 0, 0)
-        self.linear_velocity = Vec3(0, 0, 0)
-        self.wheel_angle = 0
-        self.thrust = 0
-        self.handbrake = 0
-        self.wheelspin = 0
-        self.auto_brake = 0
-        self.may_be_colliding = 0
+        self.hnd_type = hnd_type
         self.wheels = [Wheel() for _ in range(4)]
+        self.pad = 0
+        self.analog_steer = None
+        self.changing_gear = False
         self.throttle_input = 0.0
         self.brake_input = 0.0
         self.steer_input = 0.0
         self.fast_steer = False
-        self.speed = 0.0
+        self.reset()
 
     def reset(self, x: float = 0.0, z: float = 0.0, yaw: float = 0.0) -> None:  # InitCarPhysics
         self.position = Vec3(int(x * ONE), 0, int(z * ONE))
         self.orientation = int((yaw / (2 * math.pi)) * ONE) & (ONE - 1)
         self.angular_velocity = Vec3(0, 0, 0)
         self.linear_velocity = Vec3(0, 0, 0)
-        self.wheel_angle = 0
-        self.thrust = 0
-        self.handbrake = 0
-        self.wheelspin = 0
-        self.auto_brake = 0
+        self.pad_state = PadState()
+        self.wheel_speed = 0.0  # m/s along heading (C hd.wheel_speed)
+        self.speed = 0.0
+        self.may_be_colliding = 0
         for w in self.wheels:
             w.sus_compression = 0
-            w.locked = 0
+            w.locked = False
             w.slip_lateral = 0.0
             w.slip_longitudinal = 0.0
             w.wheel_speed = 0
             w.texture_fast = False
+
+    # -- C CAR_DATA fields written by ProcessCarPad -------------------------
+    @property
+    def wheel_angle(self) -> float:
+        return self.pad_state.wheel_angle
+
+    @property
+    def thrust(self) -> float:
+        return self.pad_state.thrust
+
+    @property
+    def handbrake(self) -> int:
+        return int(self.pad_state.handbrake)
+
+    @property
+    def wheelspin(self) -> int:
+        return int(self.pad_state.wheelspin)
+
+    @property
+    def auto_brake(self) -> float:
+        return self.pad_state.auto_brake
 
     def _yaw_rad(self):
         return (self.orientation / ONE) * 2.0 * math.pi
@@ -104,36 +135,52 @@ class Vehicle:
     def velocity_m(self):
         return (self.linear_velocity.x / ONE, 0.0, self.linear_velocity.z / ONE)
 
-    def process_input(self, inp) -> None:  # ProcessCarPad
+    def process_input(self, inp) -> None:
+        """Latch this frame's controls; ProcessCarPad runs in step(dt)."""
         self.steer_input = float(getattr(inp, "steer", 0.0))
         self.fast_steer = bool(getattr(inp, "fast_steer", False))
         self.throttle_input = float(getattr(inp, "throttle", 0.0))
         self.brake_input = float(getattr(inp, "brake", 0.0))
-        self.handbrake = 1 if getattr(inp, "handbrake", False) else 0
-        self.wheelspin = 1 if (self.throttle_input > 0.5 and getattr(inp, "wheelspin", False)) else 0
-
-        self.wheel_angle = steering_update(self.wheel_angle, self.steer_input,
-                                          self.fast_steer)
-        self.auto_brake = auto_brake_update(self.auto_brake, self.brake_input,
-                                           bool(self.handling.auto_brake_on))
-        self.thrust = thrust_from_input(self.cos.power_ratio, self.throttle_input,
-                                       self.brake_input, bool(self.wheelspin))
-
-    def _get_friction_scales(self):
-        any_grass = any(w.on_grass for w in self.wheels)
-        return friction_scales(self.cos, self.handling, self.thrust,
-                              bool(self.handbrake), bool(self.wheelspin),
-                              self.auto_brake, any_grass)
+        self.analog_steer = self.steer_input if getattr(inp, "analog", False) else None
+        self.pad = pad_from_input(inp)
 
     def step(self, dt: float) -> None:  # StepOneCar
-        # Phase 1: forces
+        self.pad_state = process_car_pad(
+            self.pad_state,
+            self.pad,
+            dt,
+            analog_steer=self.analog_steer,
+            power_ratio=self.cos.power_ratio,
+            wheel_speed=self.wheel_speed,
+            hnd_type=self.hnd_type,
+            changing_gear=self.changing_gear,
+        )
         self._compute_forces(dt)
-        # Phase 2: integration
         self._integrate(dt)
-        # Phase 3: wheel data (provisional; TODO wire AddWheelForcesDriver1)
         self._update_wheels()
 
+    def _apply_friction_scales(self):
+        """GetFrictionScalesDriver1, writing back thrust/wheelspin/locks."""
+        ps = self.pad_state
+        fr = get_friction_scales_driver1(
+            thrust=ps.thrust,
+            wheelspin=ps.wheelspin,
+            handbrake=ps.handbrake,
+            auto_brake=ps.auto_brake,
+            wheel_speed=self.wheel_speed,
+            front_on_grass=bool(self.wheels[0].on_grass),
+            hnd_type=self.hnd_type,
+            power_ratio=self.cos.power_ratio,
+            traction=self.cos.traction,
+        )
+        self.pad_state = PadState(ps.wheel_angle, ps.auto_brake, fr.thrust, ps.handbrake,
+                                  fr.wheelspin)
+        for w, locked in zip(self.wheels, fr.locked, strict=True):
+            w.locked = locked
+        return fr.front, fr.rear
+
     def _compute_forces(self, dt):
+        # Provisional float force model (replaced by AddWheelForcesDriver1).
         yaw = self._yaw_rad()
         self._fx = math.cos(yaw)
         self._fz = math.sin(yaw)
@@ -142,15 +189,13 @@ class Vehicle:
         self._speed = self._vx * self._fx + self._vz * self._fz
         self.speed = self._speed
 
-        front_scale, rear_scale = self._get_friction_scales()
+        front_scale, rear_scale = self._apply_friction_scales()
 
-        ax = 0.0
-        az = 0.0
-        thrust_f = self.thrust / ONE
-        ax += self._fx * thrust_f * 2.0
-        az += self._fz * thrust_f * 2.0
+        thrust = self.thrust
+        ax = self._fx * thrust * 2.0
+        az = self._fz * thrust * 2.0
 
-        steer_norm = (self.wheel_angle / 511.0) if abs(self.wheel_angle) > 0 else 0.0
+        steer_norm = self.wheel_angle / STEER_CAP_FAST
         self._yaw_torque = steer_norm * (min(abs(self._speed), 30.0) * 0.08 + 0.6)
 
         drag = 0.3 + (0.002 * self._speed * self._speed)
@@ -160,7 +205,8 @@ class Vehicle:
         self._rx = -self._fz
         self._rz = self._fx
         self._side = self._vx * self._rx + self._vz * self._rz
-        grip = (front_scale + rear_scale) / (2 * ONE) * 1.2
+        # Normalised so straight-line coasting grip matches the old model.
+        grip = (front_scale + rear_scale) / (FS_TOTAL / ONE) * 1.2
         ax -= self._rx * self._side * grip
         az -= self._rz * self._side * grip
 
@@ -186,15 +232,15 @@ class Vehicle:
         self.position.z = int(pz * ONE)
 
     def _update_wheels(self):
-        for i, w in enumerate(self.wheels):
+        yaw = self._yaw_rad()
+        vx = self.linear_velocity.x / ONE
+        vz = self.linear_velocity.z / ONE
+        self.wheel_speed = vx * math.cos(yaw) + vz * math.sin(yaw)
+        for w in self.wheels:
             w.wheel_speed = int(abs(self._speed) * ONE * 0.5)
             w.slip_lateral = abs(self._side) * 0.5
-            w.slip_longitudinal = abs(self.thrust / ONE) * 0.001
-            w.locked = 1 if (self.handbrake and i >= 2) else 0
+            w.slip_longitudinal = abs(self.thrust) * 0.001
             w.texture_fast = abs(w.wheel_speed) > config.WHEEL_FAST_TEXTURE_SPEED
-
-    def _rebuild_matrix(self):
-        pass
 
 
 class PhysicsWorld:
@@ -226,19 +272,3 @@ class PhysicsWorld:
             if vn < 0:
                 v.linear_velocity.x -= int(vn * nx * ONE * 0.5)
                 v.linear_velocity.z -= int(vn * nz * ONE * 0.5)
-
-
-if __name__ == "__main__":
-    from core.track import Track
-    from core.car_profile import load_cosmetics
-    cos = load_cosmetics()
-    v = Vehicle(cos)
-    v.reset(0, 0, 0)
-    w = PhysicsWorld(Track())
-    w.add(v)
-    inp = type("I", (), {"steer": 0.0, "throttle": 1.0, "brake": 0.0,
-                         "handbrake": False, "fast_steer": False, "wheelspin": False})()
-    v.process_input(inp)
-    for _ in range(60):
-        w.step(1 / 60.0)
-    print("speed", round(v.speed, 2), "pos", round(v.position.x / ONE, 2), round(v.position.z / ONE, 2))
