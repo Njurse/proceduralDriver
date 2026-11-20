@@ -17,6 +17,9 @@ _GRADIENTS = 16          # unit gradient directions, evenly spaced
 LACUNARITY = 2.0         # frequency step per octave
 PERSISTENCE = 0.30       # amplitude step per octave; higher makes small bumps
                          # that throw the car (0.45 rolled it in 4 of 8 test runs)
+NOISE_TYPES = ("fbm", "ridged", "terraced")
+_RIDGE_SOFT = 0.08       # softening of |n| at the crests (noise units)
+_RIDGE_MEAN = 0.20       # mean of the softened |n|, so ridged stays centred on 0
 
 
 def _fade(t):
@@ -34,10 +37,20 @@ class Terrain(SampledGround):
     ``persistence`` is the amplitude ratio and ``lacunarity`` the frequency
     ratio between octaves; the octave amplitudes are normalised so the field
     stays within about +-amplitude / 2 of base_height.
+
+    ``noise_type`` shapes it:
+      "fbm"       plain summed Perlin octaves (rolling hills);
+      "ridged"    each octave folded to 1 - |n| (sharp-ish crests and long
+                  valleys), with a softened |n| so normals stay continuous;
+      "terraced"  the fBm cut into ``terrace_steps`` flat shelves across the
+                  amplitude, each joined to the next by a smoothstep ramp
+                  over ``terrace_ramp`` of the step (mesas, stepped canyons).
+    Heights and gradients stay analytic for all three.
     """
 
     def __init__(self, seed=None, scale=None, octaves=None, amplitude=None,
-                 persistence=PERSISTENCE, lacunarity=LACUNARITY, base_height=0.0):
+                 persistence=PERSISTENCE, lacunarity=LACUNARITY, base_height=0.0,
+                 noise_type="fbm", terrace_steps=6, terrace_ramp=0.35):
         self.seed = config.TERRAIN_SEED if seed is None else int(seed)
         self.scale = float(config.TERRAIN_SCALE if scale is None else scale)
         self.octaves = int(config.TERRAIN_OCTAVES if octaves is None else octaves)
@@ -45,6 +58,11 @@ class Terrain(SampledGround):
         self.persistence = float(persistence)
         self.lacunarity = float(lacunarity)
         self.base_height = float(base_height)
+        if noise_type not in NOISE_TYPES:
+            raise ValueError(f"noise_type {noise_type!r} is not one of {', '.join(NOISE_TYPES)}")
+        self.noise_type = noise_type
+        self.terrace_step = self.amplitude / max(int(terrace_steps), 1)
+        self.terrace_ramp = float(terrace_ramp)
 
         rng = np.random.default_rng(self.seed)
         perm = rng.permutation(256)
@@ -121,10 +139,27 @@ class Terrain(SampledGround):
         else:
             noise = self._noise_np
             x, z = np.broadcast_arrays(np.asarray(x, float), np.asarray(z, float))
-        h, dhx, dhz = self.base_height, 0.0, 0.0
+        ridged = self.noise_type == "ridged"
+        h, dhx, dhz = 0.0, 0.0, 0.0
         for freq, amp, ox, oy in self._octaves:
             n, dx, dy = noise(x * freq + ox, z * freq + oy)
+            if ridged:
+                # 1 - |n| with |n| softened to sqrt(n^2 + e^2), centred on 0
+                s = (n * n + _RIDGE_SOFT * _RIDGE_SOFT) ** 0.5
+                k = -n / s
+                n, dx, dy = _RIDGE_MEAN - s, k * dx, k * dy
             h = h + amp * n
             dhx = dhx + amp * freq * dx
             dhz = dhz + amp * freq * dy
-        return h, dhx, dhz
+        if self.noise_type == "terraced":
+            h, g = _terrace(h / self.terrace_step, self.terrace_ramp)
+            h, dhx, dhz = h * self.terrace_step, dhx * g, dhz * g
+        return h + self.base_height, dhx, dhz
+
+
+def _terrace(x, ramp):
+    """Shelves: floor(x) plus a smoothstep up to the next one over the last
+    ``ramp`` of each unit.  Returns (value, d value / dx)."""
+    fl = np.floor(x)
+    v = np.clip((x - fl - (1.0 - ramp)) / ramp, 0.0, 1.0)
+    return fl + v * v * (3.0 - 2.0 * v), 6.0 * v * (1.0 - v) / ramp

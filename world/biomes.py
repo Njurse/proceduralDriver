@@ -4,9 +4,11 @@ A definition may carry any fields of its own (kept in ``Biome.extra``); the
 generator reads two sections and fills every missing key from the defaults
 below:
 
-``terrain``  the biome's fBm height field (world.terrain.Terrain) and the
-             colour ramp its chunks are painted with
-``roads``    the jittered road grid the biome grows (world.roads)
+``terrain``  the biome's height field (world.terrain.Terrain: fbm, ridged
+             or terraced noise) and the colour ramp its chunks are painted with
+``roads``    the jittered road grid the biome grows (world.roads), with
+             optional dashed centre ``markings``
+``weight``   (top level) how often world.regions picks the biome for a region
 
 A bad value or an unknown key inside those sections raises ValueError naming
 the file and the key, since a typo would otherwise fall back to the default
@@ -26,6 +28,7 @@ DEFINITIONS_DIR = config.ASSETS / "world" / "definitions"
 # Every road surface drives like tarmac for now (core.car_forces only treats
 # grass differently); the name is there for when the tyres learn about sand.
 ROAD_SURFACES = ("asphalt", "concrete", "packed_sand", "dirt", "gravel")
+NOISE_TYPES = ("fbm", "ridged", "terraced")
 
 RGB = tuple[float, float, float]
 
@@ -49,6 +52,9 @@ class TerrainRules:
     lacunarity: float = 2.0          # frequency ratio between octaves
     base_height_m: float = 0.0       # the biome's mean ground level
     steep_slope_deg: float = 11.0    # slopes past this take the steep colour
+    noise_type: str = "fbm"          # one of NOISE_TYPES
+    terrace_steps: int = 6           # "terraced": shelves across the amplitude
+    terrace_ramp: float = 0.35       # "terraced": share of each step that slopes
     colors: ColorRamp = field(default_factory=ColorRamp)
     detail_texture: str = "world/landscape/ground_texture_noise.png"  # under assets/
     detail_tile_m: float = 8.0       # metres per repeat of the detail texture
@@ -65,6 +71,7 @@ class RoadRules:
     surface: str = "asphalt"         # one of ROAD_SURFACES
     color: RGB = (0.30, 0.30, 0.32)
     flatten: bool = True             # cut/fill the terrain to the road's profile
+    markings: RGB | None = None      # dashed centre line colour, or none
 
 
 @dataclass(frozen=True)
@@ -73,6 +80,7 @@ class Biome:
     terrain: TerrainRules
     roads: RoadRules
     extra: dict                      # every other top-level field, as read
+    weight: float = 1.0              # relative odds of the biome per region
 
 
 _LIMITS = {
@@ -90,7 +98,11 @@ _LIMITS = {
     "width_m": (3.0, 30.0),
     "shoulder_m": (0.5, 50.0),
     "max_grade_pct": (0.5, 30.0),
+    "terrace_steps": (2, 24),
+    "terrace_ramp": (0.1, 0.9),
+    "weight": (0.0, 100.0),
 }
+_OPTIONAL_RGB = {"markings"}
 
 
 def _is_number(v):
@@ -99,6 +111,8 @@ def _is_number(v):
 
 def _value(where, key, raw, default):
     """``raw`` checked against the type of ``default`` and _LIMITS[key]."""
+    if key in _OPTIONAL_RGB and (raw is None or default is None):
+        return None if raw is None else _value(where, key, raw, (0.0, 0.0, 0.0))
     if isinstance(default, bool):
         if not isinstance(raw, bool):
             raise ValueError(f"{where}.{key}: expected true or false, got {raw!r}")
@@ -153,6 +167,9 @@ def parse_biome(data, where="biome", default_name="biome"):
         raise ValueError(f"{where}.name: expected a non-empty string, got {name!r}")
     terrain = _section(TerrainRules, data.get("terrain"), f"{where}.terrain")
     roads = _section(RoadRules, data.get("roads"), f"{where}.roads")
+    if terrain.noise_type not in NOISE_TYPES:
+        raise ValueError(f"{where}.terrain.noise_type: {terrain.noise_type!r} is not one of "
+                         f"{', '.join(NOISE_TYPES)}")
     if roads.surface not in ROAD_SURFACES:
         raise ValueError(f"{where}.roads.surface: {roads.surface!r} is not one of "
                          f"{', '.join(ROAD_SURFACES)}")
@@ -162,8 +179,9 @@ def parse_biome(data, where="biome", default_name="biome"):
     if not (config.ASSETS / terrain.detail_texture).is_file():
         raise ValueError(f"{where}.terrain.detail_texture: no file assets/"
                          f"{terrain.detail_texture}")
-    extra = {k: v for k, v in data.items() if k not in ("name", "terrain", "roads")}
-    return Biome(name=name, terrain=terrain, roads=roads, extra=extra)
+    weight = _value(where, "weight", data.get("weight", 1.0), 1.0)
+    extra = {k: v for k, v in data.items() if k not in ("name", "terrain", "roads", "weight")}
+    return Biome(name=name, terrain=terrain, roads=roads, extra=extra, weight=weight)
 
 
 def load_biome(name):
