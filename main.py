@@ -22,6 +22,7 @@ from panda3d.core import (
     AmbientLight,
     CardMaker,
     ClockObject,
+    ColorAttrib,
     CullFaceAttrib,
     DirectionalLight,
     Filename,
@@ -33,8 +34,10 @@ from panda3d.core import (
     GeomVertexFormat,
     GeomVertexWriter,
     Mat4,
+    MaterialAttrib,
     NodePath,
     TextNode,
+    TextureAttrib,
     TransparencyAttrib,
     Vec3,
     Vec4,
@@ -76,6 +79,22 @@ def _mat4(a, t=(0.0, 0.0, 0.0)):
                 a[0, 1], a[1, 1], a[2, 1], 0.0,
                 a[0, 2], a[1, 2], a[2, 2], 0.0,
                 t[0], t[1], t[2], 1.0)
+
+
+def _flat_colours_from_materials(model):
+    """Give untextured faces (wheel wells, the "flat" material) their material
+    diffuse as a flat colour; unlit, they would otherwise draw white."""
+    for path in model.findAllMatches("**/+GeomNode"):
+        node = path.node()
+        for i in range(node.getNumGeoms()):
+            state = node.getGeomState(i)
+            if state.hasAttrib(TextureAttrib) or not state.hasAttrib(MaterialAttrib):
+                continue
+            material = state.getAttrib(MaterialAttrib).getMaterial()
+            if material is None or not material.hasDiffuse():
+                continue
+            colour = material.getDiffuse()
+            node.setGeomState(i, state.setAttrib(ColorAttrib.makeFlat(colour)))
 
 
 class _NoPad:
@@ -203,10 +222,11 @@ class DriveSim(ShowBase):
         self.chunks.update(v.pos[0], v.pos[2], budget=(2 * self.chunks.radius + 1) ** 2)
 
         amb = AmbientLight("amb")
-        amb.setColor(Vec4(0.55, 0.55, 0.62, 1.0))
+        # ambient + sun at most 1.0, so lit colours never pass their texture
+        amb.setColor(Vec4(0.42, 0.42, 0.46, 1.0))
         self.render.setLight(self.render.attachNewNode(amb))
         dl = DirectionalLight("sun")
-        dl.setColor(Vec4(0.95, 0.92, 0.85, 1.0))
+        dl.setColor(Vec4(0.58, 0.56, 0.52, 1.0))
         dl_node = self.render.attachNewNode(dl)
         dl_node.setHpr(45, -35, 0)
         self.render.setLight(dl_node)
@@ -249,6 +269,11 @@ class DriveSim(ShowBase):
         # physics body frame negated (cars.c UpdateCarDrawMatrix), so a -1
         # scale maps it in.  Both origins are the car's centre of gravity.
         self.car_body = self.render.attachNewNode("car_body")
+        # Unlit like the PlayStation: the car shows its texture colours.  Lit,
+        # an OBJ material with Ka 1 (Blender's default) summed ambient + sun
+        # past 1.0 and washed the paint out to white.
+        self.car_body.setLightOff(1)
+        _flat_colours_from_materials(self.car)
         self.car.setScale(-_model_unit_scale(self.car, rel))
         self.car.setPos(*self.vehicle.geo.model_offset)
         # The OBJ faces are wound for Driver 2's y-down screen space, so cull
