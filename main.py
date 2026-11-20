@@ -776,6 +776,38 @@ def take_shots(game, out_dir):
     game.minimap.toggle_zoom()
     overhead(game)
     _save_shot(game, os.path.join(out_dir, "roads_overview.png"))
+    biome_shots(game, out_dir)
+
+
+def biome_shots(game, out_dir, frames=90):
+    """A chase shot down the road in each biome past plains and desert
+    (biome_<name>.png), then a high overhead and a big export over them."""
+    world = game.terrain
+    game.chunks.radius = config.TERRAIN_VIEW_CHUNKS
+    game.camLens.setNearFar(CAMERA_NEAR_M, config.DRAW_DISTANCE_M)
+    game.fog.setExpDensity(config.DRIVE_FOG_DENSITY)
+    game.key_right = False
+    game.key_throttle = True
+    game.autopilot = lambda v: world.road_steer(v.pos[0], v.pos[2], v.heading)
+    for name in config.WORLD_BIOMES[2:]:
+        game.vehicle.reset(*world.spawn(*world.regions.site_of(name)), ground=world)
+        game.session.physics._accumulator = 0.0
+        game._after_respawn()
+        for _ in range(frames):
+            game.taskMgr.step()
+        _save_shot(game, os.path.join(out_dir, f"biome_{name}.png"))
+    game.autopilot = None
+    game.key_throttle = False
+
+    overhead(game, height=1500.0, radius=14)
+    _save_shot(game, os.path.join(out_dir, "roads_overview_biomes.png"))
+    # 64 x 64 chunks (4 km) round the car at 4 m a pixel, whatever was driven
+    v = game.vehicle
+    ci, ck = int(v.pos[0] // config.TERRAIN_CHUNK_SIZE), int(v.pos[2] // config.TERRAIN_CHUNK_SIZE)
+    square = {(ci + i, ck + k) for i in range(-32, 32) for k in range(-32, 32)}
+    path, size = export_world(world, square, os.path.join(out_dir, "world_export_biomes.png"),
+                              m_per_px=4.0)
+    log.info("[shots] exported %s %s", path, size)
 
 
 def sky_chase(game):
@@ -794,14 +826,16 @@ def biome_border(game, max_radius=600.0):
     for r in np.arange(40.0, max_radius, 20.0):
         a = np.linspace(0.0, 2.0 * math.pi, int(r / 4), endpoint=False)
         x, z = v.pos[0] + r * np.sin(a), v.pos[2] + r * np.cos(a)
-        k = int(np.argmin(np.abs(world.biome_weight(x, z) - 0.5)))
-        if abs(world.biome_weight(x[k], z[k]) - 0.5) < 0.05:
+        k = int(np.argmin(world.border_weight(x, z)))
+        if world.border_weight(x[k], z[k]) < 0.55:
             best = np.array([x[k], world.height(x[k], z[k]), z[k]])
             break
     if best is None:
         log.warning("[shots] no biome border within %.0f m", max_radius)
         best = v.pos.copy()
-    _, wx, wz = world.regions.weight(best[0], best[2])
+    w, gx, gz = world.regions.weights(best[0], best[2])
+    b = int(np.argmax(w[0]))
+    wx, wz = gx[0, b], gz[0, b]
     across = np.array([wx, 0.0, wz]) / max(math.hypot(wx, wz), 1e-9)
     along = np.array([-across[2], 0.0, across[0]])
     eye = best - along * 150.0 + np.array([0.0, 45.0, 0.0])

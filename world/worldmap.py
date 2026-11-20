@@ -31,9 +31,7 @@ def chunk_tile(world, ci, ck, px, size=None):
     rgb = world.colors(gx, gz, h, n)[..., :3]
     shade = np.clip(1.0 + 2.5 * (n @ _LIGHT - _LIGHT[1]), 0.55, 1.35)[..., None]
     rgb = rgb * shade
-    w = world.biome_weight(gx, gz)[..., None]
-    c0, c1 = (np.array(b.roads.color) for b in world.biomes)
-    road = np.where(w >= 0.5, c1, c0) * 0.85
+    road = np.array([b.roads.color for b in world.biomes])[world.biome_index(gx, gz)] * 0.85
     rgb = np.where(on_road[..., None], road, rgb)
     return (np.clip(rgb, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8), on_road
 

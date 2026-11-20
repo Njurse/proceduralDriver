@@ -1,7 +1,7 @@
 """The drivable world: biome regions with a road grid flattened into them.
 
 ``World`` is the Ground the car and the chunk streamer share.  Its height
-field is world.regions.Regions (two biomes blended in blobs) with
+field is world.regions.Regions (the biomes in blended regions) with
 world.roads.RoadNetwork cut and filled in; the surface is SURFACE_ROAD on
 the tarmac (or sand track) and SURFACE_OFFROAD everywhere else.
 """
@@ -60,9 +60,16 @@ class World(SampledGround):
     def colors(self, x, z, h, n):
         return self.regions.colors(x, z, h, n)
 
-    def biome_weight(self, x, z):
-        """0 in the first biome, 1 in the second, between in the blend."""
-        return self.regions.weight(x, z)[0]
+    def biome_index(self, x, z):
+        """Index into ``biomes`` of the biome owning each point (same shape)."""
+        x, z = np.broadcast_arrays(np.asarray(x, float), np.asarray(z, float))
+        return self.regions.biome_index(x.ravel(), z.ravel()).reshape(x.shape)
+
+    def border_weight(self, x, z):
+        """The owning biome's weight: 1 inside a region, about 0.5 on a
+        border between two (same shape as x)."""
+        x, z = np.broadcast_arrays(np.asarray(x, float), np.asarray(z, float))
+        return self.regions.weights(x.ravel(), z.ravel())[0].max(axis=1).reshape(x.shape)
 
     def road_mesh(self, ci, ck, size=None):
         """Road strips for chunk (ci, ck), or None when it has no road."""

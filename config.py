@@ -35,9 +35,11 @@ SKY_RADIUS_M = 250.0            # sky dome radius, inside the far plane
 DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far plane
 
 # Biomes, regions and roads (world/biomes.py, world/regions.py, world/roads.py)
-WORLD_BIOMES = ("plains", "desert")  # assets/world/definitions/<name>.json
-REGION_SCALE_M = 900.0          # wavelength of the noise that splotches the biomes
-REGION_BAND = 0.08              # blend half-width in region-noise units (~200 m)
+WORLD_BIOMES = ("plains", "desert", "canyon", "coastal_beach", "jungle", "treacherous",
+                "village")      # assets/world/definitions/<name>.json
+REGION_SCALE_M = 900.0          # spacing of the region sites that splotch the biomes
+REGION_JITTER = 0.35            # site shift, as a fraction of the spacing
+REGION_BAND_M = 240.0           # width of the blend between neighbouring regions
 ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
 ROAD_DETAIL_TILE_M = 2.5        # metres per repeat of the road detail texture
 
