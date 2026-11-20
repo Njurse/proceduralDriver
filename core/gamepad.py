@@ -2,11 +2,11 @@
 
 import logging
 import os
-import sys
 import time
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
+from core import xinput
 from core.mathutil import clamp
 
 log = logging.getLogger("gamepad")
@@ -31,86 +31,6 @@ _BUTTON_DPAD_UP = 11
 _BUTTON_DPAD_DOWN = 12
 _BUTTON_DPAD_LEFT = 13
 _BUTTON_DPAD_RIGHT = 14
-
-# -- XInput auto-detection (Windows) ----------------------------------------
-_XINPUT = None
-if sys.platform == "win32":
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        class _XINPUT_GAMEPAD(ctypes.Structure):
-            _fields_ = [
-                ("wButtons", wintypes.WORD),
-                ("bLeftTrigger", wintypes.BYTE),
-                ("bRightTrigger", wintypes.BYTE),
-                ("sThumbLX", wintypes.SHORT),
-                ("sThumbLY", wintypes.SHORT),
-                ("sThumbRX", wintypes.SHORT),
-                ("sThumbRY", wintypes.SHORT),
-            ]
-
-        class _XINPUT_STATE(ctypes.Structure):
-            _fields_ = [
-                ("dwPacketNumber", wintypes.DWORD),
-                ("Gamepad", _XINPUT_GAMEPAD),
-            ]
-
-        _ERROR_SUCCESS = 0
-        _DPAD_UP = 0x0001
-        _DPAD_DOWN = 0x0002
-        _DPAD_LEFT = 0x0004
-        _DPAD_RIGHT = 0x0008
-        _START = 0x0010
-        _BACK = 0x0020
-        _LEFT_THUMB = 0x0040
-        _RIGHT_THUMB = 0x0080
-        _LEFT_SHOULDER = 0x0100
-        _RIGHT_SHOULDER = 0x0200
-        _A = 0x1000
-        _B = 0x2000
-        _X = 0x4000
-        _Y = 0x8000
-
-        for _dll in ("xinput1_4", "xinput1_3", "xinput9_1_0", "xinput1_2", "xinput1_1"):
-            try:
-                _lib = getattr(ctypes.windll, _dll)
-                _get_state = _lib.XInputGetState
-                _get_state.argtypes = [wintypes.DWORD, ctypes.POINTER(_XINPUT_STATE)]
-                _get_state.restype = wintypes.DWORD
-                _XINPUT = (_get_state, _XINPUT_STATE)
-                break
-            except Exception as exc:
-                log.debug("[gamepad] XInput DLL %s unavailable: %s",
-                          _dll, exc)
-                continue
-    except Exception as exc:
-        log.debug("[gamepad] XInput setup failed: %s", exc)
-        _XINPUT = None
-
-
-def _xinput_scan():
-    """Return (user_index, state) for the first connected XInput controller."""
-    if _XINPUT is None:
-        return None
-    get_state, state_type = _XINPUT
-    for user in range(4):
-        state = state_type()
-        try:
-            if get_state(user, ctypes.byref(state)) == _ERROR_SUCCESS:
-                return user, state
-        except Exception as exc:
-            log.debug("[gamepad] XInput user %d query failed: %s", user, exc)
-            continue
-    return None
-
-
-def _norm_thumb(value):
-    # XInput thumbs are signed 16-bit; normalize to [-1, 1].
-    if value < 0:
-        return max(-1.0, value / 32768.0)
-    return min(1.0, value / 32767.0)
-
 
 class Gamepad:
     """Auto-detects XInput controllers on Windows, falls back to pygame-ce."""
@@ -149,7 +69,7 @@ class Gamepad:
         return self.pygame or None
 
     def _scan_xinput(self):
-        found = _xinput_scan()
+        found = xinput.scan()
         if found is None:
             return False
         user, _state = found
@@ -224,43 +144,33 @@ class Gamepad:
         self.buttons = []
 
     def _read_xinput(self):
-        if self.xinput_user is None or _XINPUT is None:
+        pad = None if self.xinput_user is None else xinput.read(self.xinput_user)
+        if pad is None:
             self._disconnect()
             return
-        get_state, state_type = _XINPUT
-        state = state_type()
-        try:
-            if get_state(self.xinput_user, ctypes.byref(state)) != _ERROR_SUCCESS:
-                self._disconnect()
-                return
-        except Exception as exc:
-            log.debug("[gamepad] XInput read failed: %s", exc)
-            self._disconnect()
-            return
-        pad = state.Gamepad
         axes = [0.0] * 8
         # Match existing mapping: 0 LX, 1 LY, 2 RX, 3 RY, 4 LT, 5 RT
-        axes[_AXIS_LEFT_X] = _norm_thumb(pad.sThumbLX)
-        axes[_AXIS_LEFT_Y] = _norm_thumb(pad.sThumbLY)
-        axes[_AXIS_RIGHT_X] = _norm_thumb(pad.sThumbRX)
-        axes[_AXIS_RIGHT_Y] = -_norm_thumb(pad.sThumbRY)  # XInput Y is up-positive
+        axes[_AXIS_LEFT_X] = xinput.norm_thumb(pad.sThumbLX)
+        axes[_AXIS_LEFT_Y] = xinput.norm_thumb(pad.sThumbLY)
+        axes[_AXIS_RIGHT_X] = xinput.norm_thumb(pad.sThumbRX)
+        axes[_AXIS_RIGHT_Y] = -xinput.norm_thumb(pad.sThumbRY)  # XInput Y is up-positive
         axes[_AXIS_LT] = pad.bLeftTrigger / 255.0
         axes[_AXIS_RT] = pad.bRightTrigger / 255.0
         buttons = [False] * 16
         w = int(pad.wButtons)
-        buttons[_BUTTON_A] = bool(w & _A)
-        buttons[_BUTTON_B] = bool(w & _B)
-        buttons[_BUTTON_X] = bool(w & _X)
-        buttons[_BUTTON_Y] = bool(w & _Y)
-        buttons[_BUTTON_LB] = bool(w & _LEFT_SHOULDER)
-        buttons[_BUTTON_RB] = bool(w & _RIGHT_SHOULDER)
-        buttons[_BUTTON_SELECT] = bool(w & _BACK)
-        buttons[_BUTTON_START] = bool(w & _START)
-        buttons[_BUTTON_RIGHT_THUMB] = bool(w & _RIGHT_THUMB)
-        buttons[_BUTTON_DPAD_UP] = bool(w & _DPAD_UP)
-        buttons[_BUTTON_DPAD_DOWN] = bool(w & _DPAD_DOWN)
-        buttons[_BUTTON_DPAD_LEFT] = bool(w & _DPAD_LEFT)
-        buttons[_BUTTON_DPAD_RIGHT] = bool(w & _DPAD_RIGHT)
+        buttons[_BUTTON_A] = bool(w & xinput.A)
+        buttons[_BUTTON_B] = bool(w & xinput.B)
+        buttons[_BUTTON_X] = bool(w & xinput.X)
+        buttons[_BUTTON_Y] = bool(w & xinput.Y)
+        buttons[_BUTTON_LB] = bool(w & xinput.LEFT_SHOULDER)
+        buttons[_BUTTON_RB] = bool(w & xinput.RIGHT_SHOULDER)
+        buttons[_BUTTON_SELECT] = bool(w & xinput.BACK)
+        buttons[_BUTTON_START] = bool(w & xinput.START)
+        buttons[_BUTTON_RIGHT_THUMB] = bool(w & xinput.RIGHT_THUMB)
+        buttons[_BUTTON_DPAD_UP] = bool(w & xinput.DPAD_UP)
+        buttons[_BUTTON_DPAD_DOWN] = bool(w & xinput.DPAD_DOWN)
+        buttons[_BUTTON_DPAD_LEFT] = bool(w & xinput.DPAD_LEFT)
+        buttons[_BUTTON_DPAD_RIGHT] = bool(w & xinput.DPAD_RIGHT)
         self.axes = axes
         self.buttons = buttons
 
