@@ -74,7 +74,9 @@ LIFT_FRICTION_LIMIT = tuple(dr2_velocity(v) for v in (1005, 6030, 1005, 5025, 18
 # game's handling probe speed curve (67/98/130/147 u/frame at 1-4 s) matches
 # the emulation only with the front wheels kept on the road.  The y entry
 # only multiplies the horizontal force components, exactly like the C rule.
-TYRE_LEVER_SCALE = np.array([1.0, 19.0 / 32.0, 1.0])
+# 12/32 (the hard-cop value): with 19/32 the car still rolled over at full
+# lock from 50 m/s, a speed the 200+ km/h gearing now reaches.
+TYRE_LEVER_SCALE = np.array([1.0, 12.0 / 32.0, 1.0])
 SURFACE_ROAD = 0
 SURFACE_GRASS = 1
 

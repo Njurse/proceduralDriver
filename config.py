@@ -281,18 +281,19 @@ WHEEL_FAST_TEXTURE_SPEED = 3300
 # Gearbox and top speed (core/engine.py, core/car_forces.py) ----------------
 # DEVIATION: the C's wheel drag caps the car at ~147 km/h and its gear table
 # tops out first gear at ~59 km/h.  These stretch both; launch thrust is the C's.
-CAR_TOP_SPEED_KMH = 200.0       # flat-road terminal speed at full throttle
+CAR_TOP_SPEED_KMH = 215.0       # flat-road terminal speed at full throttle
 TYRE_RADIUS_M = 0.327
 GEAR_RATIOS = (2.50, 1.65, 1.25, 1.00)
 FINAL_DRIVE = 3.33
 IDLE_RPM = 850.0
 SHIFT_UP_RPM = 5600.0           # 1st-3rd top out at ~83 / 126 / 166 km/h
 SHIFT_DOWN_RPM = 2600.0         # drop a gear below this
-REDLINE_RPM = 6200.0            # 4th reaches ~5400 rpm at 200 km/h
+REDLINE_RPM = 6200.0            # 4th reaches ~5800 rpm at 215 km/h
 SHIFT_TIME_S = 0.2              # thrust cut per upshift (the C's changingGear)
 # Thrust per gear as a fraction of the C's, easing off in the higher gears.
-# 0.66 in 1st gives 0-60 mph in ~3.7 s (stock C: ~3.1 s).
-GEAR_THRUST_SCALES = (0.66, 0.62, 0.58, 0.55)
+# 0.78 in 1st gives 0-60 mph in ~3.1 s (stock C: ~3.1 s); 0.70 in 4th
+# pulls 190->200 km/h in under 3 s.
+GEAR_THRUST_SCALES = (0.78, 0.74, 0.72, 0.70)
 
 # Audio (driving) -----------------------------------------------------------
 # core/engine_sound.py (model) and core/vehicle_audio.py (output).

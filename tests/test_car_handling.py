@@ -17,9 +17,9 @@ from core.redriver2_physics import TICK_HZ, PhysicsWorld, Vehicle  # noqa: E402
 DT = 1.0 / 60.0
 
 
-def _inp(steer=0.0, throttle=0.0, brake=0.0, handbrake=False):
+def _inp(steer=0.0, throttle=0.0, brake=0.0, handbrake=False, fast_steer=False):
     return SimpleNamespace(steer=steer, throttle=throttle, brake=brake,
-                           handbrake=handbrake, fast_steer=False, wheelspin=False)
+                           handbrake=handbrake, fast_steer=fast_steer, wheelspin=False)
 
 
 def _car():
@@ -135,8 +135,8 @@ def _pitch_deg(v):
 
 # Stock game handling probe (JERICHO HOOKS.md / dev log, Chicago model 1,
 # same power/mass/traction): speed in u/frame at 1, 2, 3 and 4 s of full gas.
-# The C-exact model matched these to ~2 u/frame; config.GEAR_THRUST_SCALES now
-# softens the launch on purpose, so they are an upper bound.
+# The C-exact model matched these to ~2 u/frame; config.GEAR_THRUST_SCALES
+# retunes the launch on purpose, so the curve only has to stay near them.
 STOCK_PROBE_SPEEDS = (67, 98, 130, 147)
 
 
@@ -151,7 +151,7 @@ def test_launch_keeps_the_front_wheels_down():
     assert worst > -4.0
 
 
-def test_launch_is_no_quicker_than_stock():
+def test_launch_stays_near_the_stock_probe():
     v, world = _car()
     v.process_input(_inp(throttle=1.0))
     t60 = None
@@ -162,9 +162,9 @@ def test_launch_is_no_quicker_than_stock():
             t60 = i * DT
         if i % round(1.0 / DT) == 0 and len(speeds) < 4:
             speeds.append(v.forward_speed * 150.0 / 30.0)  # u/frame
-    assert 3.4 < t60 < 4.5  # 0-60 mph, seconds
+    assert 2.9 < t60 < 3.4  # 0-60 mph, seconds
     for got, stock in zip(speeds, STOCK_PROBE_SPEEDS, strict=True):
-        assert stock * 0.6 < got < stock + 3.0
+        assert stock * 0.8 < got < stock * 1.15
 
 
 def test_upshifts_cut_the_thrust():
@@ -181,15 +181,18 @@ def test_upshifts_cut_the_thrust():
     assert cuts > 0
 
 
-@pytest.mark.parametrize("throttle", [1.0, 0.0])
-def test_full_lock_at_speed_does_not_roll_over(throttle):
+@pytest.mark.parametrize("speed", [15.0, 30.0, 50.0])
+@pytest.mark.parametrize("controls", [
+    dict(throttle=1.0), dict(throttle=0.0), dict(handbrake=True),
+    dict(throttle=1.0, fast_steer=True)], ids=["gas", "coast", "handbrake", "fast_steer"])
+def test_full_lock_on_flat_ground_does_not_tip(speed, controls):
     v, world = _car()
     v.process_input(_inp(throttle=1.0))
-    while v.forward_speed < 30.0:
+    while v.forward_speed < speed:
         world.step(DT)
-    v.process_input(_inp(steer=1.0, throttle=throttle))
-    for _ in range(round(3.0 / DT)):
+    v.process_input(_inp(steer=1.0, **controls))
+    for _ in range(round(4.0 / DT)):
         world.step(DT)
-        assert abs(_roll_deg(v)) < 20.0
-        assert v.rot[1, 1] > 0.9
+        assert abs(_roll_deg(v)) < 15.0
+        assert v.rot[1, 1] > 0.95
     assert abs(_drift_deg(v)) > 10.0 or v.forward_speed < 15.0  # slides, scrubs speed
