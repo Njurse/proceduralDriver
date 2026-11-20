@@ -52,7 +52,7 @@ def _lru(cache, key, make, limit):
 
 
 class RoadNetwork:
-    """The roads over a world.regions.Regions."""
+    """The roads over a worldgen.regions.Regions."""
 
     def __init__(self, regions, seed=None):
         self.regions = regions

@@ -16,11 +16,13 @@ import config  # noqa: E402
 from core.car_forces import SURFACE_OFFROAD, SURFACE_ROAD  # noqa: E402
 from core.car_profile import load_cosmetics  # noqa: E402
 from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
-from world.biomes import load_biome, load_biomes, parse_biome  # noqa: E402
-from world.chunks import chunk_mesh, terrain_colors  # noqa: E402
-from world.ground import Ground  # noqa: E402
+from world.chunks import chunk_mesh  # noqa: E402
 from world.roads import MARKING_LIFT, layout  # noqa: E402
+from world.spec import load_biome, load_biomes  # noqa: E402
 from world.world import World  # noqa: E402
+from worldgen.biomes import parse_biome  # noqa: E402
+from worldgen.ground import Ground  # noqa: E402
+from worldgen.palette import terrain_colors  # noqa: E402
 
 DT = 1.0 / 60.0
 SIZE = config.TERRAIN_CHUNK_SIZE

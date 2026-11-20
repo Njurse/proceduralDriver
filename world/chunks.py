@@ -28,17 +28,11 @@ from panda3d.core import (
 import config
 from core.noise import fbm_2d
 from core.textures import _to_texture
+from worldgen.palette import terrain_colors
 
 log = logging.getLogger(__name__)
 
 DETAIL_TILE_M = 8.0      # metres per repeat of the detail texture
-
-# Vertex colours by height (fraction of amplitude) and steepness.
-_LOW = np.array([0.14, 0.28, 0.10])    # valley floor
-_MID = np.array([0.32, 0.47, 0.19])    # grass
-_HIGH = np.array([0.66, 0.60, 0.33])   # dry hilltops
-_STEEP = np.array([0.48, 0.38, 0.25])  # bare earth on the steeper slopes
-
 
 @dataclass
 class ChunkMesh:
@@ -49,23 +43,6 @@ class ChunkMesh:
     color: np.ndarray    # (n, 4)
     uv: np.ndarray       # (n, 2)
     tris: np.ndarray     # (m, 3) vertex indices
-
-
-def terrain_colors(height, normal, amplitude, ramp=None, steep_deg=11.0):
-    """RGBA per vertex from height (m above the base level) and unit normals
-    (..., 3).  ``ramp`` has low/mid/high/steep RGB (world.biomes.ColorRamp);
-    slopes blend to ``steep`` over steep_deg +- 2.2 degrees."""
-    low, mid, high, steep_rgb = ((_LOW, _MID, _HIGH, _STEEP) if ramp is None else
-                                 (np.asarray(c) for c in (ramp.low, ramp.mid, ramp.high,
-                                                          ramp.steep)))
-    t = np.clip(np.asarray(height) / (0.5 * max(amplitude, 1e-6)), -1.0, 1.0)[..., None]
-    lo = mid + (low - mid) * np.clip(-t, 0.0, 1.0)
-    rgb = lo + (high - mid) * np.clip(t, 0.0, 1.0)
-    c0, c1 = (math.cos(math.radians(steep_deg + d)) for d in (-2.2, 2.2))
-    steep = np.clip((c0 - normal[..., 1:2]) / (c0 - c1), 0.0, 1.0)
-    rgb = rgb + (steep_rgb - rgb) * steep
-    alpha = np.ones(rgb.shape[:-1] + (1,))
-    return np.concatenate([rgb, alpha], axis=-1)
 
 
 def chunk_mesh(terrain, ci, ck, size=None, res=None):

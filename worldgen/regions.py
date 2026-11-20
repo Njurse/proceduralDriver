@@ -1,11 +1,11 @@
 """Region splotching: which biome owns each patch of ground.
 
-Region sites sit on a jittered square grid (config.REGION_SCALE_M apart), and
+Region sites sit on a jittered square grid (WorldSpec.region_scale_m apart), and
 each site picks a biome by a seeded hash, weighted by the biomes' ``weight``.
 A biome with ``region_size`` n > 1 instead claims whole n x n blocks of sites
 (odds: its weight share), so its regions come out n times as wide.
 A point belongs to its nearest site; near the bisector between two sites the
-biomes blend.  Each site within REGION_BAND_M of the nearest one gets
+biomes blend.  Each site within region_band_m of the nearest one gets
 
     w_s = smoothstep(1 - (d_s - d_min) / band)
 
@@ -24,32 +24,12 @@ import math
 
 import numpy as np
 
-import config
-from core.car_forces import SURFACE_OFFROAD
-from world.biomes import load_biomes
-from world.chunks import terrain_colors
-from world.ground import SampledGround
-from world.terrain import Terrain
+from worldgen.ground import SURFACE_OFFROAD, SampledGround
+from worldgen.hashing import hash01_arr
+from worldgen.height import Terrain
+from worldgen.palette import terrain_colors
 
-_MASK = np.uint64(0xFFFFFFFFFFFFFFFF)
 _REACH = 2      # sites searched: (2 * _REACH + 1)^2 cells round the point's
-
-
-def _mix(h):
-    """splitmix64 finaliser on uint64 arrays (wraps mod 2^64)."""
-    with np.errstate(over="ignore"):
-        h = (h ^ (h >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
-        h = (h ^ (h >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
-    return h ^ (h >> np.uint64(31))
-
-
-def _hash01(seed, salt, i, j):
-    """Deterministic floats in [0, 1) for integer arrays i, j."""
-    with np.errstate(over="ignore"):
-        h = _mix(np.uint64(seed) * np.uint64(0x9E3779B97F4A7C15) + np.uint64(salt))
-        h = _mix(h + np.asarray(i).astype(np.int64).astype(np.uint64))
-        h = _mix(h + np.asarray(j).astype(np.int64).astype(np.uint64))
-    return (h >> np.uint64(11)).astype(np.float64) / float(1 << 53)
 
 
 def biome_terrain(biome, seed):
@@ -65,8 +45,9 @@ def biome_terrain(biome, seed):
 class Regions(SampledGround):
     """The world's biomes in seeded regions, blended at their borders.  No roads."""
 
-    def __init__(self, biomes=None, seed=None, scale_m=None, band_m=None, jitter=None):
-        self.biomes = tuple(load_biomes() if biomes is None else biomes)
+    def __init__(self, spec):
+        self.spec = spec
+        self.biomes = tuple(spec.biomes)
         if not self.biomes:
             raise ValueError("Regions needs at least one biome")
         weights = np.array([b.weight for b in self.biomes], float)
@@ -79,15 +60,12 @@ class Regions(SampledGround):
         self._cum = np.cumsum(small) / small.sum()
         self._big = [(b, self.biomes[b].region_size, weights[b] / weights.sum())
                      for b in np.nonzero(big)[0].tolist()]
-        self.seed = config.TERRAIN_SEED if seed is None else int(seed)
-        self.scale_m = float(config.REGION_SCALE_M if scale_m is None else scale_m)
-        self.band_m = float(config.REGION_BAND_M if band_m is None else band_m)
-        self.jitter = float(config.REGION_JITTER if jitter is None else jitter)
+        self.seed = int(spec.seed)
+        self.scale_m = float(spec.region_scale_m)
+        self.band_m = float(spec.region_band_m)
+        self.jitter = float(spec.region_jitter)
         self.terrains = tuple(biome_terrain(b, self.seed + 1 + k)
                               for k, b in enumerate(self.biomes))
-        first = self.biomes[0].terrain
-        self.detail_texture = (config.ASSETS / first.detail_texture).as_posix()
-        self.detail_tile_m = first.detail_tile_m
         self._cells = {}
         self._last_weights = None
         r = np.arange(-_REACH, _REACH + 1)
@@ -104,11 +82,11 @@ class Regions(SampledGround):
             i = ci + self._offsets[:, 0]
             j = cj + self._offsets[:, 1]
             s, jit = self.scale_m, self.jitter
-            x = (i + 0.5 + (2.0 * _hash01(self.seed, 11, i, j) - 1.0) * jit) * s
-            z = (j + 0.5 + (2.0 * _hash01(self.seed, 12, i, j) - 1.0) * jit) * s
-            pick = np.searchsorted(self._cum, _hash01(self.seed, 13, i, j), side="right")
+            x = (i + 0.5 + (2.0 * hash01_arr(self.seed, 11, i, j) - 1.0) * jit) * s
+            z = (j + 0.5 + (2.0 * hash01_arr(self.seed, 12, i, j) - 1.0) * jit) * s
+            pick = np.searchsorted(self._cum, hash01_arr(self.seed, 13, i, j), side="right")
             for b, n, odds in self._big:
-                claim = _hash01(self.seed, 14 + b, np.floor_divide(i, n), np.floor_divide(j, n))
+                claim = hash01_arr(self.seed, 14 + b, np.floor_divide(i, n), np.floor_divide(j, n))
                 pick = np.where(claim < odds, b, pick)
             pos = np.stack([x, z], axis=1)
             owner = np.minimum(pick, len(self.biomes) - 1)

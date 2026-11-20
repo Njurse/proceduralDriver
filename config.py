@@ -21,9 +21,6 @@ HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.
 # Procedural terrain (world/terrain.py, world/chunks.py) --------------------
 # Rolling hills: Perlin fBm, height = AMPLITUDE * fbm(x / SCALE, z / SCALE).
 TERRAIN_SEED = 1977
-TERRAIN_SCALE = 140.0           # metres per noise cell of the first octave
-TERRAIN_OCTAVES = 4
-TERRAIN_AMPLITUDE = 10.0        # metres; hills reach about +-5 m, slopes under 10 deg
 TERRAIN_CHUNK_SIZE = 64.0       # metres per square chunk
 TERRAIN_CHUNK_RES = 32          # quads per chunk side (2 m spacing)
 DRAW_DISTANCE_M = 290.0         # camera far plane (was ~190 m: 3 chunks of terrain)

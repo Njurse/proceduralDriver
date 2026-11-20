@@ -14,8 +14,8 @@ import config  # noqa: E402
 from core.car_profile import load_cosmetics  # noqa: E402
 from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
 from world.chunks import ChunkStreamer, chunk_mesh, chunks_around  # noqa: E402
-from world.ground import Ground  # noqa: E402
-from world.terrain import Terrain  # noqa: E402
+from worldgen.ground import Ground  # noqa: E402
+from worldgen.height import Terrain  # noqa: E402
 
 DT = 1.0 / 60.0
 RNG = np.random.default_rng(5)
@@ -24,7 +24,7 @@ PTS = RNG.uniform(-5000.0, 5000.0, (200, 2))
 
 @pytest.fixture(scope="module")
 def terrain():
-    return Terrain()
+    return Terrain(seed=config.TERRAIN_SEED)
 
 
 def _inp(steer=0.0, throttle=0.0, handbrake=False):
@@ -70,8 +70,8 @@ def test_hills_are_gentle_and_a_few_metres_high(terrain):
     gx, gz = np.meshgrid(xs, xs)
     h, dhx, dhz = terrain.sample(gx, gz)
     slope = np.degrees(np.arctan(np.hypot(dhx, dhz)))
-    assert 2.0 < h.max() < config.TERRAIN_AMPLITUDE
-    assert -config.TERRAIN_AMPLITUDE < h.min() < -2.0
+    assert 2.0 < h.max() < terrain.amplitude
+    assert -terrain.amplitude < h.min() < -2.0
     assert slope.max() < 15.0
 
 

@@ -48,7 +48,7 @@ assets/          Havana car model, wheels, handling.json and sounds
 
 Terrain knobs live in `config.py` (`TERRAIN_SEED`, `_SCALE`, `_OCTAVES`,
 `_AMPLITUDE`, chunk size, view radius).  A later layer (roads, a city) can
-wrap `Terrain` as a `world.ground.Ground` and override height, normal or
+wrap `Terrain` as a `worldgen.ground.Ground` and override height, normal or
 surface where it builds.
 
 ## Roads and traffic

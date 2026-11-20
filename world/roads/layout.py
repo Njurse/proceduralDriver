@@ -29,7 +29,8 @@ from dataclasses import dataclass
 import numpy as np
 
 import config
-from world.regions import _hash01 as _hash_arr
+from worldgen.hashing import hash01
+from worldgen.hashing import hash01_arr as _hash_arr
 
 SUPER_M = 4096.0
 PITCH_M = 102.4          # candidate lattice: also the closest two junctions get
@@ -37,21 +38,6 @@ LINK_RANGE = 1.6         # candidate edges reach this many local spacings
 GRADE_COST = 8.0
 BORDER_RUN_M = 1024.0
 _N = round(SUPER_M / PITCH_M)
-_MASK = (1 << 64) - 1
-
-
-def _mix(h):
-    h = ((h ^ (h >> 30)) * 0xBF58476D1CE4E5B9) & _MASK
-    h = ((h ^ (h >> 27)) * 0x94D049BB133111EB) & _MASK
-    return h ^ (h >> 31)
-
-
-def hash01(*keys):
-    """Deterministic float in [0, 1) from integer keys (splitmix64)."""
-    h = 0x9E3779B97F4A7C15
-    for k in keys:
-        h = _mix((h + (k & _MASK)) & _MASK)
-    return (h >> 11) / float(1 << 53)
 
 
 def field(regions, x, z):

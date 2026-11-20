@@ -1,7 +1,7 @@
 """The drivable world: biome regions with a road grid flattened into them.
 
 ``World`` is the Ground the car and the chunk streamer share.  Its height
-field is world.regions.Regions (the biomes in blended regions) with
+field is worldgen.regions.Regions (the biomes in blended regions) with
 world.roads.RoadNetwork cut and filled in; the surface is SURFACE_ROAD on
 the tarmac (or sand track) and SURFACE_OFFROAD everywhere else.
 """
@@ -11,20 +11,22 @@ import math
 import numpy as np
 
 import config
-from core.car_forces import SURFACE_OFFROAD, SURFACE_ROAD
 from world.chunks import ChunkMesh
-from world.ground import SampledGround
-from world.regions import Regions
 from world.roads import RoadNetwork
+from world.spec import world_spec
+from worldgen.ground import SURFACE_OFFROAD, SURFACE_ROAD, SampledGround
+from worldgen.regions import Regions
 
 
 class World(SampledGround):
     def __init__(self, biomes=None, seed=None):
-        self.regions = Regions(biomes, seed)
+        self.spec = world_spec(seed, biomes)
+        self.regions = Regions(self.spec)
         self.roads = RoadNetwork(self.regions)
         self.biomes = self.regions.biomes
-        self.detail_texture = self.regions.detail_texture
-        self.detail_tile_m = self.regions.detail_tile_m
+        first = self.biomes[0].terrain           # one ground texture for every chunk
+        self.detail_texture = (config.ASSETS / first.detail_texture).as_posix()
+        self.detail_tile_m = first.detail_tile_m
 
     def query(self, x, z):
         """(height, dh/dx, dh/dz, on_road) for scalars or arrays."""
