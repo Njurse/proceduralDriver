@@ -38,6 +38,7 @@ from game.car_view import CarView
 from game.chase_camera import CAMERA_NEAR_M, ChaseCamera
 from game.controls import Controls, _NoPad
 from game.shots import take_shots
+from game.traffic_view import TrafficDraw
 from ui.minimap import Minimap
 from ui.pause import APPLY_SEED, CONTINUE, EXIT, EXPORT, RESTART, PauseMenu
 from world.chunks import ChunkStreamer, detail_texture, road_detail_texture
@@ -48,7 +49,7 @@ from world.worldmap import export_world
 log = logging.getLogger("main")
 
 
-class DriveSim(Controls, ChaseCamera, CarView, ShowBase):
+class DriveSim(Controls, ChaseCamera, CarView, TrafficDraw, ShowBase):
     def __init__(self, options=None):
         options = dict(options or {})
         loadPrcFileData("nearest", NEAREST_PRC)  # textures loaded from disk
@@ -284,6 +285,7 @@ class DriveSim(Controls, ChaseCamera, CarView, ShowBase):
         self._watch(v, time.perf_counter() - t0)
 
         self._sync_car(dt)
+        self._update_traffic(dt)
         self._update_chase_cam(dt)
         self._update_hud()
         self._update_audio(dt)

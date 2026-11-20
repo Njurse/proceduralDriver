@@ -44,6 +44,16 @@ ROAD_MIN_JUNCTION_DEG = 45.0     # no two roads leave a junction closer than thi
 ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
 ROAD_DETAIL_TILE_M = 2.5        # metres per repeat of the road detail texture
 
+# Traffic (world/traffic.py, game/traffic_view.py); TRAFFIC_MAX = 0 turns it off
+TRAFFIC_MAX = 12                # cars at once
+TRAFFIC_SPEED_MS = 12.0         # cruising speed (each car 0.8-1.1x)
+TRAFFIC_SPAWN_MIN_M = 60.0      # cars appear between these distances from the player
+TRAFFIC_SPAWN_M = 300.0
+TRAFFIC_DESPAWN_M = 450.0       # and vanish beyond this
+TRAFFIC_GAP_M = 8.0             # stopped this far behind the car ahead
+TRAFFIC_ACCEL = 3.0             # m/s^2
+TRAFFIC_BRAKE = 8.0             # m/s^2
+
 # Save file, world export and minimap (world/save.py, world/worldmap.py, ui/)
 SAVE_PATH = ROOT / "saves" / "world.json"
 EXPORT_DIR = ROOT / "exports"
