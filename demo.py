@@ -22,8 +22,8 @@ except Exception as e:
 
 
 from core.car_profile import load_cosmetics
-from core.redriver2_physics import Vehicle, PhysicsWorld
-from core.track import Track, OBBWall
+from core.redriver2_physics import PhysicsWorld, Vehicle
+from core.track import OBBWall, Track
 from core.vehicle_audio import AudioManager, VehicleAudioState
 
 
@@ -81,7 +81,7 @@ def main():
     font = pygame.font.SysFont(None, 18)
 
     cos = load_cosmetics()
-    car_pts = project_car_points(cos, scale=0.06)
+    car_pts = project_car_points(cos, scale=1.0)  # OBJ is in metres
 
     track = Track()
     # a few walls to bump into
@@ -141,17 +141,16 @@ def main():
             pygame.draw.polygon(screen, (60, 60, 70), pts, 2)
 
         # car
-        yaw = vehicle.yaw_rad
+        yaw = vehicle.heading  # C convention: forward = (sin, cos) in (x, z)
         cos_y = math.cos(yaw)
         sin_y = math.sin(yaw)
-        _pm = vehicle.position_m
-        vx = _pm[0]
-        vz = _pm[2]
+        vx = vehicle.pos[0]
+        vz = vehicle.pos[2]
         car_screen_pts = []
-        for (lx, lz) in car_pts[0]:
-            # rotate local point by yaw
-            rx = lx * cos_y - lz * sin_y
-            rz = lx * sin_y + lz * cos_y
+        for (mx, mz) in car_pts[0]:
+            lx, lz = -mx, -mz  # OBJ model space is the physics body frame negated
+            rx = lx * cos_y + lz * sin_y
+            rz = -lx * sin_y + lz * cos_y
             sx = int(cx0 + (vx + rx) * scale_px)
             sz = int(cy0 + (vz + rz) * scale_px)
             car_screen_pts.append((sx, sz))
@@ -165,13 +164,13 @@ def main():
         csx = int(cx0 + vx * scale_px)
         csz = int(cy0 + vz * scale_px)
         pygame.draw.circle(screen, (255, 200, 80), (csx, csz), 5)
-        hx = int(csx + fx * 20) if False else int(csx + math.cos(yaw) * 20)
-        hz = int(csz + math.sin(yaw) * 20)
+        hx = int(csx + math.sin(yaw) * 20)
+        hz = int(csz + math.cos(yaw) * 20)
         pygame.draw.line(screen, (255, 200, 80), (csx, csz), (hx, hz), 2)
 
         # debug overlay
         lines = [
-            f"pos=({vx:.1f},{vz:.1f}) speed={vehicle.speed:.2f} yaw={vehicle.orientation}",
+            f"pos=({vx:.1f},{vz:.1f}) speed={vehicle.speed:.2f} heading={math.degrees(yaw):.1f}",
             f"throttle={vehicle.throttle_input:.2f} brake={vehicle.brake_input:.2f} steer={vehicle.steer_input:.2f}",
             f"wheel_angle={vehicle.wheel_angle} handbrake={vehicle.handbrake} auto_brake={vehicle.auto_brake}",
             f"thrust={vehicle.thrust}",
@@ -186,7 +185,7 @@ def main():
         # per-wheel texture labels
         for i, w in enumerate(vehicle.wheels):
             lbl = "FAST" if w.texture_fast else "clean"
-            surf = font.render(f"w{i}:{lbl} ws={w.wheel_speed}", True, (180, 180, 180))
+            surf = font.render(f"w{i}:{lbl} ws={w.wheel_speed:.1f}", True, (180, 180, 180))
             screen.blit(surf, (10, 10 + (len(lines) + i) * 18))
 
         pygame.display.flip()
