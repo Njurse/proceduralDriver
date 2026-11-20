@@ -30,6 +30,8 @@ DRAW_DISTANCE_M = 290.0         # camera far plane (was ~190 m: 3 chunks of terr
 # chunks kept loaded in each direction round the car: enough to reach the far plane
 TERRAIN_VIEW_CHUNKS = math.ceil(DRAW_DISTANCE_M / TERRAIN_CHUNK_SIZE)
 TERRAIN_BUILDS_PER_FRAME = 2    # chunk meshes built per frame while streaming
+SKYBOX_PNG = (ASSETS / "world" / "landscape" / "skybox.png").as_posix()
+SKY_RADIUS_M = 250.0            # sky dome radius, inside the far plane
 DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far plane
 
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m

@@ -54,6 +54,7 @@ from core.textures import NEAREST_PRC, _to_texture, load_color_keyed, seamless_f
 from core.units import DR2_UNITS_PER_METRE
 from core.vehicle_audio import AudioManager, sound_input
 from world.chunks import ChunkStreamer, detail_texture
+from world.sky import build_sky
 from world.terrain import Terrain
 
 log = logging.getLogger("main")
@@ -231,10 +232,16 @@ class DriveSim(ShowBase):
         dl_node.setHpr(45, -35, 0)
         self.render.setLight(dl_node)
 
+        # Sky dome round the camera; the fog and the clear colour take the
+        # panorama's horizon haze so distant ground fades into it.
+        self.sky, horizon = build_sky(config.SKYBOX_PNG, self.camera, self.render,
+                                      config.SKY_RADIUS_M)
+        self.setBackgroundColor(*horizon, 1.0)
+
         # Exp-squared fog: clear near the car, thick before the streaming edge.
         self.fog = Fog("drive-fog")
         self.fog.setMode(Fog.MExponentialSquared)
-        self.fog.setColor(0.35, 0.46, 0.62)
+        self.fog.setColor(*horizon)
         self.fog.setExpDensity(config.DRIVE_FOG_DENSITY)
         self.render.setFog(self.fog)
 
