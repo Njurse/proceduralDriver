@@ -42,7 +42,7 @@ ROAD_MIN_JUNCTION_DEG = 45.0     # no two roads leave a junction closer than thi
 ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
 ROAD_DETAIL_TILE_M = 2.5        # metres per repeat of the road detail texture
 
-# Traffic (world/traffic.py, game/traffic_view.py); TRAFFIC_MAX = 0 turns it off
+# Traffic (worldgen/traffic.py via world/spec.py, game/traffic_view.py); TRAFFIC_MAX = 0 turns it off
 TRAFFIC_MAX = 12                # cars at once
 TRAFFIC_SPEED_MS = 12.0         # cruising speed (each car 0.8-1.1x)
 TRAFFIC_SPAWN_MIN_M = 60.0      # cars appear between these distances from the player

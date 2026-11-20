@@ -5,7 +5,8 @@ import logging
 from panda3d.core import Mat4, NodePath
 
 from core.mathutil import clamp
-from world.traffic import Traffic
+from world.spec import traffic_spec
+from worldgen.traffic import Traffic
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class TrafficDraw:
         if self.traffic is None or self.traffic.world is not world:
             if self.traffic_view is not None:
                 self.traffic_view.destroy()
-            self.traffic = Traffic(world, seed=self.session.seed)
+            self.traffic = Traffic(world, traffic_spec(), seed=self.session.seed)
             ride = clamp(v.pos[1] - world.height(v.pos[0], v.pos[2]), 0.3, 1.5)
             self.traffic_view = TrafficView(self.render, self.car, self.wheel_mounts, ride)
             log.info("[traffic] up to %d cars, ride height %.2f m", self.traffic.max_cars, ride)
