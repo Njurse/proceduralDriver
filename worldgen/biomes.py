@@ -85,6 +85,7 @@ class Biome:
     extra: dict                      # every other top-level field, as read
     weight: float = 1.0              # relative odds of the biome per region
     region_size: int = 1             # regions span this many sites each way
+    encroach: float = 0.0            # 0..1: how far its regions push into neighbours
 
 
 _LIMITS = {
@@ -106,6 +107,7 @@ _LIMITS = {
     "terrace_ramp": (0.1, 0.9),
     "weight": (0.0, 100.0),
     "region_size": (1, 6),
+    "encroach": (0.0, 1.0),
     "grid": (0.0, 1.0),
     "grid_heading_deg": (-360.0, 360.0),
     "loop_odds": (0.0, 1.0),
@@ -195,10 +197,11 @@ def parse_biome(data, where="biome", default_name="biome", assets_dir=None):
                          f"{terrain.detail_texture}")
     weight = _value(where, "weight", data.get("weight", 1.0), 1.0)
     size = _value(where, "region_size", data.get("region_size", 1), 1)
+    encroach = _value(where, "encroach", data.get("encroach", 0.0), 0.0)
     extra = {k: v for k, v in data.items()
-             if k not in ("name", "terrain", "roads", "weight", "region_size")}
+             if k not in ("name", "terrain", "roads", "weight", "region_size", "encroach")}
     return Biome(name=name, terrain=terrain, roads=roads, extra=extra, weight=weight,
-                 region_size=size)
+                 region_size=size, encroach=encroach)
 
 
 def load_biome(name, definitions_dir, assets_dir=None):

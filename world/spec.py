@@ -26,6 +26,8 @@ def world_spec(seed=None, biomes=None):
                      biomes=tuple(load_biomes() if biomes is None else biomes),
                      region_scale_m=config.REGION_SCALE_M, region_jitter=config.REGION_JITTER,
                      region_band_m=config.REGION_BAND_M,
+                     region_warp_m=config.REGION_WARP_M,
+                     region_warp_scale_m=config.REGION_WARP_SCALE_M,
                      chunk_size_m=config.TERRAIN_CHUNK_SIZE,
                      chunk_res=config.TERRAIN_CHUNK_RES,
                      roads=RoadSpec(min_junction_deg=config.ROAD_MIN_JUNCTION_DEG,

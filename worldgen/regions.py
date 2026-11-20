@@ -17,6 +17,14 @@ weights' own gradients, so heights and normals are continuous everywhere:
     h  = sum_b W_b h_b
     dh = sum_b (W_b dh_b + h_b dW_b)
 
+Borders are made organic two ways.  The lookup is domain-warped: a point
+(x, z) finds its sites at (u, v) = (x, z) + region_warp_m * (n1, n2), two
+low-frequency noise fields, so straight bisectors wander into lobes and
+fingers (the weights' gradients carry the warp's Jacobian).  And a biome's
+``encroach`` (0..1) shortens every distance to its sites by
+encroach * ENCROACH_SHARE * region_scale_m, so its regions push past the
+plain bisector into their neighbours.  Weights still sum to 1.
+
 Physics and chunk meshes both read ``sample``, so they cannot disagree.
 """
 
@@ -30,6 +38,7 @@ from worldgen.height import Terrain
 from worldgen.palette import terrain_colors
 
 _REACH = 2      # sites searched: (2 * _REACH + 1)^2 cells round the point's
+ENCROACH_SHARE = 0.25   # encroach 1 shortens distances by this share of the site spacing
 
 
 def biome_terrain(biome, seed):
@@ -64,12 +73,37 @@ class Regions(SampledGround):
         self.scale_m = float(spec.region_scale_m)
         self.band_m = float(spec.region_band_m)
         self.jitter = float(spec.region_jitter)
+        self._bias = np.array([b.encroach for b in self.biomes]) * ENCROACH_SHARE * self.scale_m
+        self.warp_m = float(spec.region_warp_m)
+        ws = float(spec.region_warp_scale_m)
+        self._warp_u = Terrain(seed=self.seed + 7001, scale=ws, octaves=3, amplitude=2.0,
+                               persistence=0.5)
+        self._warp_v = Terrain(seed=self.seed + 7002, scale=ws, octaves=3, amplitude=2.0,
+                               persistence=0.5)
         self.terrains = tuple(biome_terrain(b, self.seed + 1 + k)
                               for k, b in enumerate(self.biomes))
         self._cells = {}
         self._last_weights = None
         r = np.arange(-_REACH, _REACH + 1)
         self._offsets = np.stack(np.meshgrid(r, r), axis=-1).reshape(-1, 2)
+
+    # ------------------------------------------------------------- warp
+    def warp(self, x, z):
+        """(u, v, du/dx, du/dz, dv/dx, dv/dz): where (x, z) looks up its sites."""
+        a = self.warp_m
+        if a == 0.0:
+            return x, z, 1.0, 0.0, 0.0, 1.0
+        n1, n1x, n1z = self._warp_u.sample(x, z)
+        n2, n2x, n2z = self._warp_v.sample(x, z)
+        return x + a * n1, z + a * n2, 1.0 + a * n1x, a * n1z, a * n2x, 1.0 + a * n2z
+
+    def unwarp(self, u, v, steps=8):
+        """A point (x, z) whose warp lands on (u, v) (fixed-point iteration)."""
+        x, z = u, v
+        for _ in range(steps):
+            wu, wv = self.warp(x, z)[:2]
+            x, z = x + (u - wu), z + (v - wv)
+        return x, z
 
     # ------------------------------------------------------------- sites
     def _sites(self, ci, cj):
@@ -90,25 +124,32 @@ class Regions(SampledGround):
                 pick = np.where(claim < odds, b, pick)
             pos = np.stack([x, z], axis=1)
             owner = np.minimum(pick, len(self.biomes) - 1)
+            bias = self._bias[owner]
             hit = self._cells[key] = (pos, owner,
                                       list(zip(x.tolist(), z.tolist(), owner.tolist(),
-                                               strict=True)))
+                                               bias.tolist(), strict=True)), bias)
         return hit
 
     def _weights_scalar(self, x, z):
         """weights() for one point in plain Python (the physics path):
         [(biome, W, dW/dx, dW/dz)] for the biomes with W > 0."""
+        u, v, ux, uz, vx, vz = self.warp(x, z)
+        return [(b, w, wu * ux + wv * vx, wu * uz + wv * vz)
+                for b, w, wu, wv in self._weights_scalar_uv(float(u), float(v))]
+
+    def _weights_scalar_uv(self, x, z):
         sites = self._sites(math.floor(x / self.scale_m), math.floor(z / self.scale_m))[2]
         near = []
-        for sx, sz, b in sites:
+        for sx, sz, b, bias in sites:
             px, pz = x - sx, z - sz
-            near.append((math.hypot(px, pz), px, pz, b))
-        d0, px0, pz0, _ = min(near)
+            d = math.hypot(px, pz)
+            near.append((d - bias, d, px, pz, b))
+        e0, d0, px0, pz0, _ = min(near)
         inv0 = 1.0 / max(d0, 1e-9)
         g0x, g0z = px0 * inv0, pz0 * inv0
         acc = {}
-        for d, px, pz, b in near:
-            t = (d - d0) / self.band_m
+        for e, d, px, pz, b in near:
+            t = (e - e0) / self.band_m
             if t >= 1.0:
                 continue
             f = 1.0 - t * t * (3.0 - 2.0 * t)
@@ -134,6 +175,15 @@ class Regions(SampledGround):
         last = self._last_weights
         if last is not None and np.array_equal(last[0], x) and np.array_equal(last[1], z):
             return last[2]
+        u, v, ux, uz, vx, vz = self.warp(x, z)
+        wn, wu, wv = self._weights_uv(u, v)
+        out = wn, wu * np.reshape(ux, (-1, 1)) + wv * np.reshape(vx, (-1, 1)), \
+            wu * np.reshape(uz, (-1, 1)) + wv * np.reshape(vz, (-1, 1))
+        self._last_weights = (x.copy(), z.copy(), out)
+        return out
+
+    def _weights_uv(self, x, z):
+        """weights() in warped coordinates: (W, dW/du, dW/dv)."""
         n, nb = len(x), len(self.biomes)
         w, wx, wz = np.zeros((n, nb)), np.zeros((n, nb)), np.zeros((n, nb))
         ci = np.floor(x / self.scale_m).astype(np.int64)
@@ -146,15 +196,16 @@ class Regions(SampledGround):
             groups = [(int(c[0]), int(c[1]), np.nonzero(inv == g)[0])
                       for g, c in enumerate(cells)]
         for gi, gj, m in groups:
-            pos, owner, _ = self._sites(gi, gj)
+            pos, owner, _, bias = self._sites(gi, gj)
             px = x[m, None] - pos[None, :, 0]
             pz = z[m, None] - pos[None, :, 1]
             d = np.hypot(px, pz)
             inv_d = 1.0 / np.maximum(d, 1e-9)
             gx, gz = px * inv_d, pz * inv_d
-            k = np.argmin(d, axis=1)
+            e = d - bias[None, :]
+            k = np.argmin(e, axis=1)
             r = np.arange(len(d))
-            t = np.clip((d - d[r, k][:, None]) / self.band_m, 0.0, 1.0)
+            t = np.clip((e - e[r, k][:, None]) / self.band_m, 0.0, 1.0)
             f = 1.0 - t * t * (3.0 - 2.0 * t)
             df = -6.0 * t * (1.0 - t) / self.band_m
             fx = df * (gx - gx[r, k][:, None])
@@ -164,21 +215,21 @@ class Regions(SampledGround):
         total = w.sum(axis=1, keepdims=True)
         tx, tz = wx.sum(axis=1, keepdims=True), wz.sum(axis=1, keepdims=True)
         wn = w / total
-        out = wn, (wx - wn * tx) / total, (wz - wn * tz) / total
-        self._last_weights = (x.copy(), z.copy(), out)
-        return out
+        return wn, (wx - wn * tx) / total, (wz - wn * tz) / total
 
     def site_mean(self, x, z, values):
         """Per point, the mean of per-site ``values(pos (k, 2), biome (k,))``
         -> (k, m), weighted like the terrain blend (no gradients): (n, m)."""
         x, z = np.atleast_1d(np.asarray(x, float)), np.atleast_1d(np.asarray(z, float))
+        x, z = self.warp(x, z)[:2]
         ci = np.floor(x / self.scale_m).astype(np.int64)
         cj = np.floor(z / self.scale_m).astype(np.int64)
         out = None
         for cell in np.unique(np.stack([ci, cj], axis=1), axis=0):
             m = np.nonzero((ci == cell[0]) & (cj == cell[1]))[0]
-            pos, owner, _ = self._sites(int(cell[0]), int(cell[1]))
+            pos, owner, _, bias = self._sites(int(cell[0]), int(cell[1]))
             d = np.hypot(x[m, None] - pos[None, :, 0], z[m, None] - pos[None, :, 1])
+            d = d - bias[None, :]
             t = np.clip((d - d.min(axis=1, keepdims=True)) / self.band_m, 0.0, 1.0)
             f = 1.0 - t * t * (3.0 - 2.0 * t)
             v = values(pos, owner)
@@ -247,7 +298,8 @@ class Regions(SampledGround):
         return out.reshape(shape + (4,))
 
     def site_of(self, biome_name, near=(0.0, 0.0), radius_cells=12):
-        """Centre (x, z) of the nearest region site owned by ``biome_name``."""
+        """Centre (x, z) of the nearest region site owned by ``biome_name``
+        (the point that warps onto the site)."""
         b = [bi.name for bi in self.biomes].index(biome_name)
         ci = math.floor(near[0] / self.scale_m)
         cj = math.floor(near[1] / self.scale_m)
@@ -255,11 +307,12 @@ class Regions(SampledGround):
         for r in range(0, radius_cells + 1, _REACH * 2 + 1):
             for di in range(-r, r + 1, _REACH * 2 + 1):
                 for dj in range(-r, r + 1, _REACH * 2 + 1):
-                    pos, owner, _ = self._sites(ci + di, cj + dj)
+                    pos, owner, _, _ = self._sites(ci + di, cj + dj)
                     for p in pos[owner == b]:
                         d = math.hypot(p[0] - near[0], p[1] - near[1])
                         if best is None or d < best[0]:
                             best = (d, (float(p[0]), float(p[1])))
             if best is not None:
-                return best[1]
+                x, z = self.unwarp(*best[1])
+                return float(x), float(z)
         raise ValueError(f"no {biome_name} region within {radius_cells} cells")
