@@ -250,49 +250,43 @@ INVENTORY_ROWS = 4
 # Driving / REDRIVER2 handling model
 # ---------------------------------------------------------------------------
 # Car model loading ---------------------------------------------------------
-# The havana OBJ is authored Y-up (roof at +Y, wheels below) and faces -Z
-# (headlights at z=-363 in handling.json).  Do NOT flip the vertical axis.
+# The havana OBJs are in metres (Driver 2 units / core.units.DR2_UNITS_PER_METRE)
+# but keep Driver 2 model axes: Y points DOWN (roof at -Y) and the nose faces
+# -Z.  drive.py maps them onto the physics body with a -1 scale.
 CAR_MODEL_INVERT_VERTICAL = False
 HAVANA_MODEL_DIR = (ASSETS / "vehicle" / "havana_model0").as_posix()
 HAVANA_HANDLING_JSON = (ASSETS / "vehicle" / "havana_model0" / "handling.json").as_posix()
 HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.obj").as_posix()
-HAVANA_SHIP_SCALE = 0.01
-# Model -> Panda3D: pitch +90 deg about X maps model +Y -> Panda +Z (up) and
-# model -Z (nose) -> Panda +Y (forward).  Yaw is a fine-tune knob (0 = nose
-# points along the physics forward axis).
-DRIVE_CAR_PITCH_OFFSET = 90.0
-DRIVE_CAR_YAW_OFFSET = 0.0
-# Wheel disc scale is in model units: 70 * 0.5 * HAVANA_SHIP_SCALE = 0.35 m
-# rolling radius, matching core.vehicle3d's wheel_speed divisor.
-HAVANA_WHEEL_SCALE = 70.0
+# Space-mode ship scale only (core/ship_profiles.py).  It was 0.01 on the old
+# Driver 2 unit OBJ; the OBJ is now 150x smaller, so 1.5 keeps the ship's size.
+# The driving sim draws the car at 1:1 metres.
+HAVANA_SHIP_SCALE = 0.01 * 150.0
 HAVANA_WHEEL_TEXTURES = (ASSETS / "vehicle" / "wheels" / "havana").as_posix()
 # Driving world -------------------------------------------------------------
-DRIVE_REVERSE_MULT = 0.45       # reverse throttle as a fraction of MAX_DRIVE
 DRIVE_FOG_DENSITY = 0.005       # exponential fog density for the ground plane
 DRIVE_BOUNDARY_MARGIN = 12.0    # keep the car this far inside the ground quad
 
-# Fixed-point / physics -----------------------------------------------------
-ONE = 4096
-PHYSICS_SUBSTEPS = 1
-DT_FIXED = 1.0 / 60.0
+# Wheels / audio inputs -------------------------------------------------------
+# Wheel speeds are rad/s x 100 (0.327 m tyre radius): 3300 ~ 11 m/s.
 WHEEL_FAST_TEXTURE_SPEED = 3300
-WHEEL_SLOW_TEXTURE_SPEED = 2500
-REDLINE_WHEEL_SPEED = 3300
+REDLINE_WHEEL_SPEED = 12000     # ~39 m/s, near the car's ~41 m/s top speed
 
 # Audio (driving) -----------------------------------------------------------
 ENGINE_PITCH_MIN = 0.8
 ENGINE_PITCH_MAX = 1.5
 ENGINE_VOLUME_MIN = 0.3
 ENGINE_VOLUME_MAX = 1.0
-IDLE_ENTER_SPEED = 8.0
-IDLE_EXIT_SPEED = 12.0
+IDLE_ENTER_SPEED = 8.0          # m/s
+IDLE_EXIT_SPEED = 12.0          # m/s
 IDLE_THROTTLE_EPS = 0.05
 AUDIO_CROSSFADE_MS = 200
-SKID_SLIP_THRESHOLD = 0.4
-SKID_SLIP_RELEASE = 0.2
+# Slip is the sideways (or locked/spinning) speed at a tyre's contact, m/s.
+# Normal hard cornering slides ~0.6 m/s; handbrake turns 0.8-1.5 m/s.
+SKID_SLIP_THRESHOLD = 1.0
+SKID_SLIP_RELEASE = 0.5
 SKID_VOLUME_MIN = 0.2
 SKID_VOLUME_MAX = 1.0
 SKID_FADE_OUT_MS = 200
-SKID_HB_SPEED_MIN = 4.0
+SKID_HB_SPEED_MIN = 4.0         # m/s
 SKID_COOLDOWN_S = 0.05
-SPEED_NOMINAL = 120.0
+SPEED_NOMINAL = 40.0            # m/s, about the car's top speed

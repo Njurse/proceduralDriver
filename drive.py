@@ -5,32 +5,36 @@ Run:  python drive.py            (windowed)
 """
 
 import argparse
+import contextlib
 import logging
 import math
 import os
 import sys
 
 import numpy as np
-from direct.showbase.ShowBase import ShowBase
 from direct.gui.OnscreenText import OnscreenText
+from direct.showbase.ShowBase import ShowBase
 from panda3d.core import (
     AmbientLight,
     CardMaker,
     ClockObject,
+    CullFaceAttrib,
     DirectionalLight,
+    Filename,
     Fog,
+    Mat4,
     NodePath,
-    Texture,
     TextureStage,
-    Vec3,
+    TransparencyAttrib,
     Vec4,
+    getModelPath,
 )
 
 import config
 from core.car_profile import load_cosmetics
 from core.gamepad import Gamepad
-from core.vehicle3d import Vehicle3D, Input
-from core.textures import seamless_fbm, _to_texture
+from core.redriver2_physics import Input, PhysicsWorld, Vehicle
+from core.textures import _to_texture, seamless_fbm
 from core.vehicle_audio import AudioManager, VehicleAudioState
 
 log = logging.getLogger("drive")
@@ -38,6 +42,29 @@ log = logging.getLogger("drive")
 WORLD_SIZE = 400.0
 CAM_DIST = 10.0
 CAM_HEIGHT = 3.6
+
+# Physics frame (x, y up, z forward) -> Panda3D (x, y forward, z up).  This
+# swap is a reflection; the C physics frame is itself mirrored relative to
+# the screen, so steering right turns right on screen.
+PHYS_TO_PANDA = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
+
+
+def _mat4(a, t=(0.0, 0.0, 0.0)):
+    """Column-vector 3x3 transform + translation -> Panda's row-vector Mat4."""
+    return Mat4(a[0, 0], a[1, 0], a[2, 0], 0.0,
+                a[0, 1], a[1, 1], a[2, 1], 0.0,
+                a[0, 2], a[1, 2], a[2, 2], 0.0,
+                t[0], t[1], t[2], 1.0)
+
+
+def _rot_x(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
+
+
+def _rot_y(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
 
 
 class DriveSim(ShowBase):
@@ -49,7 +76,9 @@ class DriveSim(ShowBase):
         self.clock = ClockObject.getGlobalClock()
 
         self.cos = load_cosmetics()
-        self.vehicle = Vehicle3D(self.cos)
+        self.vehicle = Vehicle(self.cos)
+        self.physics = PhysicsWorld()
+        self.physics.add(self.vehicle)
         self.input = Input()
         self.pad = Gamepad()
         self.reverse = False
@@ -71,10 +100,6 @@ class DriveSim(ShowBase):
     # ------------------------------------------------------------ setup
     def _setup_window(self):
         self.setBackgroundColor(0.35, 0.46, 0.62, 1.0)
-        try:
-            props = self.win and self.win.getProperties()
-        except Exception:
-            props = None
         try:
             from panda3d.core import WindowProperties
             p = WindowProperties()
@@ -127,7 +152,7 @@ class DriveSim(ShowBase):
         # Make the OBJ's own directory visible to Panda3D's model path so its
         # relative texture references (textures/PAGE_36.png) resolve.
         try:
-            self.getModelPath().appendDir(os.path.dirname(obj_path))
+            getModelPath().appendDirectory(Filename.fromOsSpecific(os.path.dirname(obj_path)))
         except Exception as exc:
             log.debug("[car] model path append failed: %s", exc)
         rel = None
@@ -136,32 +161,27 @@ class DriveSim(ShowBase):
         except Exception:
             rel = obj_path
         try:
-            self.car = self.loader.loadModel(rel)
+            # noCache: the OBJs were rescaled in place, so a model-cache entry
+            # from the old Driver 2 unit file must not be reused.
+            self.car = self.loader.loadModel(Filename.fromOsSpecific(obj_path),
+                                             noCache=True)
         except Exception as exc:
             log.warning("[car] load failed: %s", exc)
             self.car = NodePath("fallback_car")
         if self.car.isEmpty():
             self.car = NodePath("fallback_car")
 
-        scale = getattr(config, "HAVANA_SHIP_SCALE", 0.01)
-        self.car.setScale(scale)
-        # The havana OBJ is Y-up; only flip when a profile explicitly asks.
-        if getattr(config, "CAR_MODEL_INVERT_VERTICAL", False):
-            self.car.setScale(scale, -scale, scale)
-
-        # Rotate the model's long axis onto Panda3D +Y (forward) and its up
-        # axis onto +Z.  Pitch +90 maps model -Z (nose) -> +Y and +Y -> +Z.
-        self.car.setP(getattr(config, "DRIVE_CAR_PITCH_OFFSET", 90.0))
-        self.car.setH(getattr(config, "DRIVE_CAR_YAW_OFFSET", 0.0))
-
-        # Center the model on its tight bounds so it doesn't orbit its pivot.
-        try:
-            low, high = self.car.getTightBounds()
-            self.car.setPos(-(low + high) * 0.5)
-        except Exception as exc:
-            log.debug("[car] centering failed: %s", exc)
-
-        self.car.reparentTo(self.render)
+        # The car body node carries the physics pose (see _sync_car); its local
+        # frame is the C physics body frame in metres.  The OBJ is in metres
+        # too, in Driver 2 model space (y down, nose at -z), which is the
+        # physics body frame negated (cars.c UpdateCarDrawMatrix), so a -1
+        # scale maps it in.  Both origins are the car's centre of gravity.
+        self.car_body = self.render.attachNewNode("car_body")
+        self.car.setScale(-1.0)
+        # The OBJ faces are wound for Driver 2's y-down screen space, so cull
+        # the other side.
+        self.car.setAttrib(CullFaceAttrib.makeReverse())
+        self.car.reparentTo(self.car_body)
 
         # Verify the OBJ's texture references resolved.  Panda leaves the mesh
         # untextured when the relative paths are missing, so fall back to a
@@ -177,7 +197,7 @@ class DriveSim(ShowBase):
                         rel)
             self.car.setTexture(self._grey_texture(), 1)
 
-        # Wheel discs at the physics wheel offsets (converted to model units).
+        # Wheel discs, placed every frame where cars.c DrawCarWheels draws them.
         self.wheel_nodes = []
         self.wheel_spin = 0.0
         wheel_tex = None
@@ -188,40 +208,41 @@ class DriveSim(ShowBase):
         if wheel_tex_path:
             try:
                 load_path = wheel_tex_path
-                try:
+                with contextlib.suppress(ValueError):
                     load_path = os.path.relpath(wheel_tex_path, config.ROOT)
-                except ValueError:
-                    pass
                 wheel_tex = self.loader.loadTexture(load_path)
             except Exception as exc:
                 log.debug("[car] wheel texture load failed: %s", exc)
                 wheel_tex = None
-        wheel_scale = getattr(config, "HAVANA_WHEEL_SCALE", 70.0)
-        for off in self.vehicle.wheel_offsets:
-            # Wheel offsets are metres in model space (x, y_up, z); the car
-            # node is scaled by `scale`, so express them in model units.
-            wn = self.car.attachNewNode("wheel")
-            wn.setPos(off[0] / scale, off[1] / scale, off[2] / scale)
-            spinner = wn.attachNewNode("spinner")
+        diameter = 2.0 * self.vehicle.geo.wheel_radius
+        # card local x/z span the disc, its normal (y) lies along the axle (x)
+        disc_mat = np.array([[0.0, 1.0, 0.0],
+                             [diameter, 0.0, 0.0],
+                             [0.0, 0.0, diameter]])
+        self.wheel_mounts = []
+        for _ in range(4):
+            mount = self.car_body.attachNewNode("wheel")
+            spinner = mount.attachNewNode("spinner")
             try:
                 cm = CardMaker("wheeldisc")
                 cm.setFrame(-0.5, 0.5, -0.5, 0.5)
                 disc = spinner.attachNewNode(cm.generate())
-                disc.setScale(wheel_scale)
+                disc.setMat(_mat4(disc_mat))
                 if wheel_tex is not None:
                     disc.setTexture(wheel_tex, 1)
-                # CardMaker normal is +Z; roll -90 points it along the axle.
-                disc.setR(-90.0)
                 disc.setTwoSided(True)
+                disc.setTransparency(TransparencyAttrib.MBinary)
             except Exception as exc:
                 log.debug("[car] wheel disc build failed: %s", exc)
+            self.wheel_mounts.append(mount)
             self.wheel_nodes.append(spinner)
+        self.wheel_spins = [0.0] * 4
 
     def _verify_model_textures(self, obj_path):
         """Log a warning for every texture referenced by the MTL that is missing."""
         mtl_path = os.path.splitext(obj_path)[0] + ".mtl"
         try:
-            with open(mtl_path, "r") as handle:
+            with open(mtl_path) as handle:
                 lines = handle.readlines()
         except Exception as exc:
             log.debug("[car] mtl check failed for %s: %s", mtl_path, exc)
@@ -320,28 +341,19 @@ class DriveSim(ShowBase):
             fast = bool(fast or self.pad.right_shoulder)
 
         v = self.vehicle
-        # Reverse gear: hold the brake at a standstill to back up; throttle or
-        # forward motion returns to drive.
-        if throttle > 0.05:
-            self.reverse = False
-        elif brake > 0.1 and v.forward_speed < 0.5:
-            self.reverse = True
-        if v.forward_speed > 1.0:
-            self.reverse = False
-        if self.reverse:
-            inp.throttle = -brake * getattr(config, "DRIVE_REVERSE_MULT", 0.45)
-            inp.brake = 0.0
-        else:
-            inp.throttle = throttle
-            inp.brake = brake
+        # No separate reverse gear: the C brake thrust reverses the car once
+        # it is nearly stopped (ProcessCarPad).
+        inp.throttle = throttle
+        inp.brake = brake
         inp.steer = steer
         inp.handbrake = handbrake
         inp.fast_steer = fast
+        inp.analog = self.pad.connected and abs(self.pad.left_x) > 0.0
         v.process_input(inp)
-        v.step(dt, substeps=4)
+        self.physics.step(dt)
         self._clamp_to_world()
 
-        self._sync_car()
+        self._sync_car(dt)
         self._update_chase_cam()
         self._update_hud()
         self._update_audio(dt)
@@ -361,34 +373,24 @@ class DriveSim(ShowBase):
                 if v.vel[vel_axis] < 0.0:
                     v.vel[vel_axis] *= -0.25
 
-    def _sync_car(self):
+    def _sync_car(self, dt):
         v = self.vehicle
-        # physics (x, y_up, z) -> panda (x, y_fwd=z, z_up=y_up)
-        self.car.setPos(v.pos[0], v.pos[2], v.pos[1])
-        self.car.setHpr(
-            math.degrees(v.yaw) + getattr(config, "DRIVE_CAR_YAW_OFFSET", 180.0),
-            math.degrees(v.pitch) + getattr(config, "DRIVE_CAR_PITCH_OFFSET", -90.0),
-            math.degrees(-v.roll))
+        self.car_body.setMat(_mat4(PHYS_TO_PANDA @ v.rot, PHYS_TO_PANDA @ v.pos))
 
-        # spin the wheel discs about their axle (local X)
-        if self.wheel_nodes:
-            avg = sum(abs(w.wheel_speed) for w in v.wheels) / max(1, len(v.wheels))
-            self.wheel_spin += math.degrees(avg / 0.35) * (1.0 / 60.0)
-            for spinner in self.wheel_nodes:
-                try:
-                    spinner.setP(self.wheel_spin)
-                except Exception:
-                    pass
+        for i, (mount, spinner) in enumerate(zip(self.wheel_mounts, self.wheel_nodes,
+                                                 strict=True)):
+            steer = v.wheel_angle if i in (0, 2) else 0.0
+            mount.setMat(_mat4(_rot_y(steer), v.wheel_visual_offset(i)))
+            self.wheel_spins[i] = (self.wheel_spins[i] + v.wheels[i].wheel_speed * dt) % math.tau
+            spinner.setMat(_mat4(_rot_x(self.wheel_spins[i])))
 
     def _update_chase_cam(self):
         v = self.vehicle
-        cy, sy = math.cos(v.yaw), math.sin(v.yaw)
-        # panda: forward = (sin(yaw), cos(yaw), 0)
-        cam_x = v.pos[0] - math.sin(v.yaw) * CAM_DIST
-        cam_y = v.pos[2] - math.cos(v.yaw) * CAM_DIST
-        cam_z = v.pos[1] + CAM_HEIGHT
-        self.camera.setPos(cam_x, cam_y, cam_z)
-        self.camera.lookAt(v.pos[0], v.pos[2], v.pos[1] + 0.8)
+        h = v.heading
+        px, py, pz = PHYS_TO_PANDA @ v.pos
+        self.camera.setPos(px - math.sin(h) * CAM_DIST, py - math.cos(h) * CAM_DIST,
+                           pz + CAM_HEIGHT)
+        self.camera.lookAt(px, py, pz + 0.8)
 
     def _update_hud(self):
         v = self.vehicle
@@ -401,25 +403,23 @@ class DriveSim(ShowBase):
     def _update_audio(self, dt):
         v = self.vehicle
         st = self.audio_state
-        st.speed = v.speed
-        st.throttle = v.throttle
-        st.handbrake = 1 if self.key_hb else 0
-        st.wheelspin = 0
-        st.wheel_speeds = [abs(w.wheel_speed) * 100.0 for w in v.wheels]
+        st.speed = v.speed  # m/s
+        st.throttle = v.throttle_input
+        st.handbrake = v.handbrake
+        st.wheelspin = v.wheelspin
+        st.wheel_speeds = [abs(w.wheel_speed) * 100.0 for w in v.wheels]  # rad/s x 100
         st.slip_lateral = max((w.slip_lateral for w in v.wheels), default=0.0)
         st.slip_longitudinal = max((w.slip_longitudinal for w in v.wheels),
                                   default=0.0)
-        st.locked = [w.locked if hasattr(w, "locked") else 0 for w in v.wheels]
+        st.locked = [w.locked for w in v.wheels]
         try:
             self.audio.update(dt, st)
         except Exception as exc:
             log.debug("[audio] %s", exc)
 
     def destroy(self):
-        try:
+        with contextlib.suppress(Exception):
             self.audio.shutdown()
-        except Exception:
-            pass
         super().destroy()
 
 
