@@ -1,0 +1,32 @@
+{
+  "name": "desert",
+  "description": "Sand sea: long, tall dunes crossed by a sparse grid of winding packed-sand tracks.",
+  "terrain": {
+    "noise_scale_m": 260.0,
+    "amplitude_m": 14.0,
+    "octaves": 3,
+    "persistence": 0.35,
+    "lacunarity": 2.2,
+    "base_height_m": 3.0,
+    "steep_slope_deg": 14.0,
+    "colors": {
+      "low": [0.70, 0.57, 0.38],
+      "mid": [0.80, 0.68, 0.46],
+      "high": [0.89, 0.79, 0.57],
+      "steep": [0.62, 0.46, 0.30]
+    },
+    "detail_texture": "world/landscape/ground_texture_noise.png",
+    "detail_tile_m": 8.0
+  },
+  "roads": {
+    "grid_spacing_m": 400.0,
+    "jitter_m": 40.0,
+    "curviness_m": 60.0,
+    "width_m": 6.0,
+    "shoulder_m": 14.0,
+    "max_grade_pct": 9.0,
+    "surface": "packed_sand",
+    "color": [0.56, 0.47, 0.35],
+    "flatten": true
+  }
+}
