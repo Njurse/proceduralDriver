@@ -34,6 +34,7 @@ from panda3d.core import (
     GeomVertexWriter,
     Mat4,
     NodePath,
+    TextNode,
     TransparencyAttrib,
     Vec3,
     Vec4,
@@ -46,7 +47,7 @@ from core.car_profile import load_cosmetics
 from core.gamepad import Gamepad
 from core.orbit_camera import OrbitCamera, orbit_offset
 from core.redriver2_physics import Input, PhysicsWorld, Vehicle
-from core.textures import _to_texture, load_color_keyed, seamless_fbm
+from core.textures import NEAREST_PRC, _to_texture, load_color_keyed, seamless_fbm, use_nearest
 from core.units import DR2_UNITS_PER_METRE
 from core.vehicle_audio import AudioManager, sound_input
 from world.chunks import ChunkStreamer, detail_texture
@@ -133,6 +134,7 @@ def _rot_y(a):
 class DriveSim(ShowBase):
     def __init__(self, options=None):
         options = dict(options or {})
+        loadPrcFileData("nearest", NEAREST_PRC)  # textures loaded from disk
         ShowBase.__init__(self,
                           windowType=options.get("window_type", "onscreen"))
         self.disableMouse()
@@ -245,10 +247,10 @@ class DriveSim(ShowBase):
         # untextured when the relative paths are missing, so fall back to a
         # procedural grey instead of rendering a blank/pink car.
         self._verify_model_textures(obj_path)
-        try:
-            tex_count = len(self.car.findAllTextures())
-        except Exception:
-            tex_count = 0
+        car_textures = self.car.findAllTextures()
+        for tex in car_textures:
+            use_nearest(tex)
+        tex_count = len(car_textures)
         log.info("[car] model=%s textures=%d", rel, tex_count)
         if tex_count == 0:
             log.warning("[car] no textures resolved for %s; using procedural grey",
@@ -370,6 +372,7 @@ class DriveSim(ShowBase):
 
     # ------------------------------------------------------------- hud
     def _build_hud(self):
+        use_nearest(TextNode.getDefaultFont())
         self.speed_label = OnscreenText(
             text="0 km/h", pos=(-0.72, -0.82), scale=0.12,
             fg=(1, 1, 1, 1), align=2, shadow=(0, 0, 0, 0.6))

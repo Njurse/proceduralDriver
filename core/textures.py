@@ -30,7 +30,18 @@ def upload_rgba(texture, rgba):
     texture.setRamImage(np.ascontiguousarray(np.flipud(data)).tobytes())
 
 
-def _to_texture(rgba, name, repeat=False, linear=True):
+# Every surface uses nearest ("closest") filtering for the PlayStation look.
+NEAREST_PRC = "texture-minfilter nearest\ntexture-magfilter nearest\n"
+
+
+def use_nearest(texture):
+    """Set nearest filtering, no mipmaps, on a texture or text font."""
+    texture.setMinfilter(Texture.FT_nearest)
+    texture.setMagfilter(Texture.FT_nearest)
+    return texture
+
+
+def _to_texture(rgba, name, repeat=False):
     """Create a Panda3D texture from an ``(h, w, 3|4)`` uint8 array."""
     arr = _normalise_rgba(rgba)
     height, width = arr.shape[:2]
@@ -38,8 +49,7 @@ def _to_texture(rgba, name, repeat=False, linear=True):
     texture.setup2dTexture(width, height, Texture.T_unsigned_byte,
                            Texture.F_rgba8)
     upload_rgba(texture, arr)
-    texture.setMagfilter(Texture.FT_linear if linear else Texture.FT_nearest)
-    texture.setMinfilter(Texture.FT_linear if linear else Texture.FT_nearest)
+    use_nearest(texture)
     if repeat:
         texture.setWrapU(Texture.WMRepeat)
         texture.setWrapV(Texture.WMRepeat)
