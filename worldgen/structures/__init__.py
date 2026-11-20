@@ -58,25 +58,45 @@ class Structures:
         out = []
         for b, gen, params, salt, slope, margin in rules:
             ctx.salt = salt
-            out += [s for s in gen(ctx, params) if self._keep(s, b, slope, margin, pts, hw)]
+            out += self._keep([s for s in gen(ctx, params) if self._clear(s, margin, pts, hw)],
+                              b, slope)
         return out
 
-    def _keep(self, s, b, slope, margin, pts, hw):
+    @staticmethod
+    def _clear(s, margin, pts, hw):
+        """True when footprint ``s`` stays ``margin`` off every road surface."""
+        if not len(pts):
+            return True
         fp = s.footprint
-        c = fp.mean(axis=0)
-        probe = np.concatenate([fp, c[None], 0.5 * (fp + np.roll(fp, -1, axis=0))])
+        lo, hi = fp.min(axis=0) - 40.0, fp.max(axis=0) + 40.0
+        m = ((pts >= lo) & (pts <= hi)).all(axis=1)
+        # road points are <= 4 m apart: 2 m more covers the surface between them
+        return not (m.any() and (poly_distance(fp, pts[m, 0], pts[m, 1]) - hw[m]
+                                 < margin + 2.0).any())
+
+    def _keep(self, cands, b, slope):
+        """The candidates wholly inside biome ``b`` on gentle ground, with base_y set.
+
+        Probes (vertices, centroid, edge midpoints) of every candidate go to the
+        ground in one batch: per-instance calls cost more in overhead than maths.
+        """
+        if not cands:
+            return []
+        probes, ends = [], []
+        for s in cands:
+            fp = s.footprint
+            probes += [fp, fp.mean(axis=0)[None], 0.5 * (fp + np.roll(fp, -1, axis=0))]
+            ends.append(2 * len(fp) + 1)
+        probe = np.concatenate(probes)
         x, z = probe[:, 0], probe[:, 1]
-        if len(pts):
-            lo, hi = fp.min(axis=0) - 40.0, fp.max(axis=0) + 40.0
-            m = ((pts >= lo) & (pts <= hi)).all(axis=1)
-            # road points are <= 4 m apart: 2 m more covers the surface between them
-            if m.any() and (poly_distance(fp, pts[m, 0], pts[m, 1]) - hw[m]
-                            < margin + 2.0).any():
-                return False
-        if (self.ground.biome_index(x, z) != b).any():
-            return False
+        inside = self.ground.biome_index(x, z) == b
         h, hx, hz = self.ground.sample(x, z)
-        if np.hypot(hx, hz).max() > slope:
-            return False
-        s.base_y = float(h.min()) - 0.2
-        return True
+        gentle = np.hypot(hx, hz) <= slope
+        ok = inside & gentle
+        out, a = [], 0
+        for s, n in zip(cands, ends, strict=True):
+            if ok[a:a + n].all():
+                s.base_y = float(h[a:a + n].min()) - 0.2
+                out.append(s)
+            a += n
+        return out
