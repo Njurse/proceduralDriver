@@ -8,12 +8,11 @@ ASSETS = ROOT / "assets"
 # Window / loop -------------------------------------------------------------
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
-TARGET_FPS = 60
 
 # Car model loading ---------------------------------------------------------
 # The havana OBJs are in metres (Driver 2 units / core.units.DR2_UNITS_PER_METRE)
 # but keep Driver 2 model axes: Y points DOWN (roof at -Y) and the nose faces
-# -Z.  drive.py maps them onto the physics body with a -1 scale.
+# -Z.  main.py maps them onto the physics body with a -1 scale.
 CAR_MODEL_INVERT_VERTICAL = False
 HAVANA_HANDLING_JSON = (ASSETS / "vehicle" / "havana_model0" / "handling.json").as_posix()
 HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.obj").as_posix()
@@ -22,7 +21,7 @@ HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.
 DRIVE_FOG_DENSITY = 0.005       # exponential fog density for the ground plane
 DRIVE_BOUNDARY_MARGIN = 12.0    # keep the car this far inside the ground quad
 
-# Chase camera (drive.py).  Heights are above the car body's origin (~0.77 m
+# Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in
 # the chase view and slides back onto the car as the right stick orbits round.
 CHASE_CAM_DIST = 7.5            # metres behind the car (was 10)

@@ -1,8 +1,8 @@
-"""Standalone 3D driving simulator (REDRIVER2 handling, Panda3D renderer).
+"""Procedural driving game: REDRIVER2 handling, Panda3D renderer.
 
-Run:  python drive.py            (windowed)
-      python drive.py --offscreen --frames N
-      python drive.py --shots DIR    (save camera test screenshots, offscreen)
+Run:  python main.py            (windowed)
+      python main.py --offscreen --frames N
+      python main.py --shots DIR    (save camera test screenshots, offscreen)
 
 Camera: right stick (or I/J/K/L) swings the camera round the car, release to
 return to the chase view; R3 (or O) latches the current angle.
@@ -43,7 +43,7 @@ from core.redriver2_physics import Input, PhysicsWorld, Vehicle
 from core.textures import _to_texture, seamless_fbm
 from core.vehicle_audio import AudioManager, sound_input
 
-log = logging.getLogger("drive")
+log = logging.getLogger("main")
 
 WORLD_SIZE = 400.0
 # --shots: (file name, orbit angle in degrees) after a short run-up
