@@ -4,59 +4,61 @@
   "damaged": "HAVANA_model0_damaged.obj",
   "low": "HAVANA_model0_low.obj",
   "wheels": {
-    "clean": {"png": "textures/wheelclean.bmp", "set": 21, "island": [192, 64, 256, 128]},
-    "damaged": {"png": "textures/wheeldam.bmp", "set": 21, "island": [192, 0, 256, 64]},
-    "fast": {"png": "textures/wheelfast.bmp", "set": 21, "island": [192, 64, 256, 128]}
+    "clean": {"png": "textures/havana/wheelclean.png", "set": 21, "island": [192, 64, 256, 128]},
+    "damaged": {"png": "textures/havana/wheeldam_fixed.png", "set": 21, "island": [192, 0, 256, 64]},
+    "fast": {"png": "textures/havana/wheelfast.png", "set": 21, "island": [192, 64, 256, 128]}
   },
   "textures": {
-    "21": {"png": "../../shared/textures/PAGE_21.png"},
-    "36": {"png": "textures/PAGE_36.png"}
+    "21": {"png": "textures/PAGE_21.png"},
+    "36": {"png": "textures/PAGE_36.png"},
+    "20": {"png": "textures/PAGE_20.png"}
   },
   "sounds": {
     "engine": {"wav": "sounds/engine.wav", "rate": 16000, "normalise": false, "loop": true},
     "idle": {"wav": "sounds/idle.wav", "rate": 16000, "normalise": false, "loop": true},
-    "horn": {"wav": "sounds/horn.wav", "rate": 8000, "normalise": false, "loop": false},
     "max_rate": 16000,
-    "sample_bytes": 16384
+    "sample_bytes": 16384,
+    "cop": false,
+    "horn": {"wav": "sounds/horn.wav", "rate": 8000, "normalise": false, "loop": false}
   },
   "handling": {
-    "headLight": [108, 7, -363],
-    "frontInd": [102, 18, -351],
-    "backInd": [119, -14, 350],
-    "brakeLight": [118, -2, 363],
-    "revLight": [116, -2, 359],
+    "headLight": [108, 17, -363],
+    "frontInd": [102, 41, -351],
+    "backInd": [119, 2, 350],
+    "brakeLight": [118, 22, 363],
+    "revLight": [110, 21, 359],
     "policeLight": [0, -87, -3],
     "exhaust": [68, 62, 352],
     "smoke": [2, -21, -333],
     "fire": [2, -16, -333],
-    "wheelDisp": [[134, -116, 242], [134, -116, -199], [-135, -116, 242], [-135, -116, -199]],
-    "extraInfo": -31720,
+    "wheelDisp": [[133, -30, 242], [134, -30, -199], [-134, -30, 242], [-135, -30, -199]],
+    "extraInfo": 1048,
     "powerRatio": 4096,
-    "cbYoffset": -21,
+    "cbYoffset": 0,
     "susCoeff": 4096,
     "traction": 4096,
     "wheelSize": 49,
     "cPoints": [
-      [-137, -65, -362],
-      [136, -65, -362],
-      [-138, -69, 371],
-      [137, -69, 371],
-      [-135, 32, -375],
-      [134, 32, -375],
-      [-102, 83, -110],
-      [101, 83, -110],
-      [-102, 85, 106],
-      [101, 85, 106],
-      [-138, 26, 375],
-      [137, 26, 375]
+      [-137, 20, -362],
+      [136, 20, -362],
+      [-138, 16, 371],
+      [137, 16, 371],
+      [-135, 118, -375],
+      [134, 118, -375],
+      [-102, 169, -110],
+      [101, 169, -110],
+      [-102, 171, 106],
+      [101, 171, 106],
+      [-138, 112, 375],
+      [137, 112, 375]
     ],
-    "colBox": [143, 89, 379],
-    "cog": [0, 3, 0],
+    "colBox": [138, 88, 379],
+    "cog": [0, -89, 0],
     "twistRateX": 224,
     "twistRateY": 224,
     "twistRateZ": 1120,
     "mass": 4096
   },
   "note": "4096 = 1.0 for mass/traction/susCoeff/powerRatio; edit cars/<car>/handling.json (or this record) and rebake",
-  "raw": "6c00070095fe000066001200a1fe00007700f2ff5e0100007600feff6b0100007400feff670100000000a9fffdff000044003e00600100000200ebffb3fe00000200f0ffb3fe000086008cfff200000086008cff39ff000079ff8cfff200000079ff8cff39ff000018840010ebff00100010310077ffbfff96fe00008800bfff96fe000076ffbbff730100008900bbff7301000079ff200089fe00008600200089fe00009aff530092ff00006500530092ff00009aff55006a000000650055006a00000076ff1a007701000089001a00770100008f0059007b0100000000030000000000e000e00060040010"
+  "raw": "6c00110095fe000066002900a1fe0000770002005e010000760016006b0100006e001500670100000000a9fffdff000044003e00600100000200ebffb3fe00000200f0ffb3fe00008500e2fff20000008600e2ff39ff00007affe2fff200000079ffe2ff39ff000018040010000000100010310077ff140096fe00008800140096fe000076ff100073010000890010007301000079ff760089fe00008600760089fe00009affa90092ff00006500a90092ff00009affab006a0000006500ab006a00000076ff70007701000089007000770100008a0058007b0100000000a7ff00000000e000e00060040010"
 }
