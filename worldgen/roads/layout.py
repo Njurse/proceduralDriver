@@ -109,6 +109,17 @@ def apex(seed, a, b):
     return 0.5 * (a[0] + b[0]) - cz * bow, 0.5 * (a[1] + b[1]) + cx * bow
 
 
+def curves(seed, a, b, bias):
+    """True with odds ``bias`` for the road between nodes a and b (either way round):
+    its bend is rounded into a curve rather than the biome's corner."""
+    if bias <= 0.0:
+        return False
+    if (b[0], b[1]) < (a[0], a[1]):
+        a, b = b, a
+    key = (round(a[0] * 8), round(a[1] * 8), round(b[0] * 8), round(b[1] * 8))
+    return hash01(seed, 6, *key) < bias
+
+
 def _rot(x, z, a):
     c, s = np.cos(a), np.sin(a)
     return c * x - s * z, s * x + c * z

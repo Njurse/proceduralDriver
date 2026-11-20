@@ -2,8 +2,10 @@
 
 ``build`` shapes an edge through its layout ``apex``: one quadratic Bezier,
 or with the biome's ``corner_radius_m`` straight legs and a bend of that
-radius at the apex (0: a sharp corner), cut into ~SEGMENT_M segments; ``_profile`` smooths the terrain under
-it and clamps it to the biome's grade.  ``blend`` (point arrays) and
+radius at the apex (0: a sharp corner; with odds ``curve_bias`` the radius is
+at least ``curve_radius_m`` instead, so lone sharp corners become curves),
+cut into ~SEGMENT_M segments; ``_profile`` smooths the terrain under it and
+clamps it to the biome's grade.  ``blend`` (point arrays) and
 ``blend_point`` (one point, plain Python for the physics tick) cut and fill
 the terrain: the road height within half the width, a smoothstep back to the
 terrain over the shoulder, overlapping roads averaged by weight.
@@ -13,7 +15,7 @@ import math
 
 import numpy as np
 
-from worldgen.roads.layout import apex
+from worldgen.roads.layout import apex, curves
 
 SEGMENT_M = 4.0
 SMOOTH_WINDOW_M = 48.0
@@ -119,7 +121,11 @@ def build(regions, seed, key, a, b, biome):
     length = float(np.hypot(*(p2 - p0)))
     if length < 1e-3:
         return None
-    pts = _shape(p0, np.array(apex(seed, a, b)), p2, biome.roads.corner_radius_m)
+    rules = biome.roads
+    radius = rules.corner_radius_m
+    if radius is not None and curves(seed, a, b, rules.curve_bias):
+        radius = max(radius, rules.curve_radius_m)      # a sweeping curve, not a corner
+    pts = _shape(p0, np.array(apex(seed, a, b)), p2, radius)
     ht = np.asarray(regions.height(pts[:, 0], pts[:, 1]), float)
     ht[0], ht[-1] = a[2], b[2]
     s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))])

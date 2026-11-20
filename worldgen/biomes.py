@@ -97,6 +97,8 @@ class RoadRules:
     loop_odds: float = 0.12          # organic: odds a short non-tree link makes a loop
     l_corner_odds: float = 0.0       # organic: odds a road turns a square L corner
     corner_radius_m: float | None = None  # bend radius; none: one smooth curve, 0: sharp
+    curve_bias: float = 0.0          # odds a road's bend is a curve of curve_radius_m instead
+    curve_radius_m: float = 60.0     # (at least) the radius of those curves
     roadside: RoadsideRules = field(default_factory=RoadsideRules)
 
 
@@ -137,6 +139,8 @@ _LIMITS = {
     "loop_odds": (0.0, 1.0),
     "l_corner_odds": (0.0, 1.0),
     "corner_radius_m": (0.0, 500.0),
+    "curve_bias": (0.0, 1.0),
+    "curve_radius_m": (5.0, 500.0),
     "side_m": (0.0, 12.0),
     "lift_m": (0.0, 0.5),
     "curb_m": (0.0, 1.0),
