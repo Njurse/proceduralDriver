@@ -11,11 +11,11 @@ import math
 import numpy as np
 
 import config
-from world.ground import GroundBase
+from world.ground import SampledGround
 
 _GRADIENTS = 16          # unit gradient directions, evenly spaced
-_LACUNARITY = 2.0        # frequency step per octave
-_GAIN = 0.30             # amplitude step per octave; higher makes small bumps
+LACUNARITY = 2.0         # frequency step per octave
+PERSISTENCE = 0.30       # amplitude step per octave; higher makes small bumps
                          # that throw the car (0.45 rolled it in 4 of 8 test runs)
 
 
@@ -28,14 +28,23 @@ def _dfade(t):
     return 30.0 * t * t * (t * (t - 2.0) + 1.0)
 
 
-class Terrain(GroundBase):
-    """height(x, z) = amplitude * fBm(x / scale, z / scale), in metres."""
+class Terrain(SampledGround):
+    """height(x, z) = base_height + amplitude * fBm(x / scale, z / scale), in metres.
 
-    def __init__(self, seed=None, scale=None, octaves=None, amplitude=None):
+    ``persistence`` is the amplitude ratio and ``lacunarity`` the frequency
+    ratio between octaves; the octave amplitudes are normalised so the field
+    stays within about +-amplitude / 2 of base_height.
+    """
+
+    def __init__(self, seed=None, scale=None, octaves=None, amplitude=None,
+                 persistence=PERSISTENCE, lacunarity=LACUNARITY, base_height=0.0):
         self.seed = config.TERRAIN_SEED if seed is None else int(seed)
         self.scale = float(config.TERRAIN_SCALE if scale is None else scale)
         self.octaves = int(config.TERRAIN_OCTAVES if octaves is None else octaves)
         self.amplitude = float(config.TERRAIN_AMPLITUDE if amplitude is None else amplitude)
+        self.persistence = float(persistence)
+        self.lacunarity = float(lacunarity)
+        self.base_height = float(base_height)
 
         rng = np.random.default_rng(self.seed)
         perm = rng.permutation(256)
@@ -46,9 +55,9 @@ class Terrain(GroundBase):
         self._gx, self._gy = self._gx_np.tolist(), self._gy_np.tolist()
         # per-octave lattice offsets, so octaves don't all vanish at the origin
         self._offsets = (rng.random((self.octaves, 2)) * 256.0).tolist()
-        amps = [_GAIN ** k for k in range(self.octaves)]
+        amps = [self.persistence ** k for k in range(self.octaves)]
         norm = self.amplitude / sum(amps)
-        self._octaves = [(_LACUNARITY ** k / self.scale, a * norm, ox, oy)
+        self._octaves = [(self.lacunarity ** k / self.scale, a * norm, ox, oy)
                          for k, (a, (ox, oy)) in enumerate(zip(amps, self._offsets,
                                                                strict=True))]
 
@@ -112,24 +121,10 @@ class Terrain(GroundBase):
         else:
             noise = self._noise_np
             x, z = np.broadcast_arrays(np.asarray(x, float), np.asarray(z, float))
-        h = dhx = dhz = 0.0
+        h, dhx, dhz = self.base_height, 0.0, 0.0
         for freq, amp, ox, oy in self._octaves:
             n, dx, dy = noise(x * freq + ox, z * freq + oy)
             h = h + amp * n
             dhx = dhx + amp * freq * dx
             dhz = dhz + amp * freq * dy
         return h, dhx, dhz
-
-    def height(self, x, z):
-        return self.sample(x, z)[0]
-
-    def normal(self, x, z):
-        """Unit normal; shape (3,) for scalars, (..., 3) for arrays."""
-        _, dhx, dhz = self.sample(x, z)
-        n = np.stack(np.broadcast_arrays(-np.asarray(dhx), 1.0, -np.asarray(dhz)), axis=-1)
-        return n / np.linalg.norm(n, axis=-1, keepdims=True)
-
-    def __call__(self, x, z):
-        h, dhx, dhz = self.sample(x, z)
-        inv = 1.0 / math.sqrt(dhx * dhx + 1.0 + dhz * dhz)
-        return h, np.array([-dhx * inv, inv, -dhz * inv]), self.surface(x, z)
