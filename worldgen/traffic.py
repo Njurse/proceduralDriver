@@ -1,6 +1,6 @@
-"""Basic traffic: kinematic cars on world.roads.lanes paths.
+"""Basic traffic: kinematic cars on worldgen.roads.lanes paths (no engine).
 
-Up to config.TRAFFIC_MAX cars appear on lanes a ring round the player,
+Up to TrafficSpec.max_cars cars appear on lanes a ring round the player,
 drive at a cruising speed, ease off for sharp turns at junctions, slow and
 stop behind the car ahead in their lane, take a random exit at each node
 and vanish once far away.  No physics: they follow the lane exactly.
@@ -13,13 +13,24 @@ from dataclasses import dataclass
 
 import numpy as np
 
-import config
-from world.roads.lanes import LaneMap, connector
+from worldgen.roads.lanes import LaneMap, connector
 
 log = logging.getLogger(__name__)
 
 TINTS = ((0.85, 0.2, 0.2), (0.2, 0.4, 0.85), (0.9, 0.85, 0.3), (0.25, 0.7, 0.35),
          (0.9, 0.9, 0.9), (0.3, 0.3, 0.32), (0.8, 0.45, 0.2))
+
+
+@dataclass(frozen=True)
+class TrafficSpec:
+    max_cars: int = 12           # cars at once
+    speed_ms: float = 12.0       # cruising speed (each car 0.8-1.1x)
+    spawn_min_m: float = 60.0    # cars appear between these distances from the player
+    spawn_m: float = 300.0
+    despawn_m: float = 450.0     # and vanish beyond this
+    gap_m: float = 8.0           # stopped this far behind the car ahead
+    accel: float = 3.0           # m/s^2
+    brake: float = 8.0           # m/s^2
 
 
 @dataclass(eq=False)
@@ -35,9 +46,12 @@ class Car:
     def pose(self):
         """(position (3,), rotation (3, 3)): columns right, up, forward."""
         pos, fwd = self.lane.at(self.s)
-        right = np.array([fwd[2], 0.0, -fwd[0]])
-        right /= max(float(np.linalg.norm(right)), 1e-9)
-        return pos, np.stack([right, np.cross(fwd, right), fwd], axis=1)
+        fx, fy, fz = fwd.tolist()                  # plain floats: a dozen cars a frame
+        n = max(math.sqrt(fz * fz + fx * fx), 1e-9)
+        rx, rz = fz / n, -fx / n                   # right, level
+        return pos, np.array([[rx, fy * rz, fx],   # up = forward x right
+                              [0.0, fz * rx - fx * rz, fy],
+                              [rz, -fy * rx, fz]])
 
 
 def _turn(a, b):
@@ -48,32 +62,32 @@ def _turn(a, b):
 
 
 class Traffic:
-    """The traffic round the player on a world.world.World."""
+    """The traffic round the player on a worldgen.query.WorldGround."""
 
-    def __init__(self, world, seed=0, max_cars=None):
-        self.world = world
+    def __init__(self, world, spec, seed=0, max_cars=None):
+        self.world, self.spec = world, spec
         self.lanes = LaneMap(world.roads)
         self.rng = random.Random(seed)
-        self.max_cars = config.TRAFFIC_MAX if max_cars is None else int(max_cars)
+        self.max_cars = spec.max_cars if max_cars is None else int(max_cars)
         self.cars = []
         self._ids = 0
 
     # ------------------------------------------------------------ spawning
     def _spawn(self, px, pz):
-        lanes = [ln for ln in self.lanes.lanes_near(px, pz, config.TRAFFIC_SPAWN_M)
-                 if ln.length > 2.0 * config.TRAFFIC_GAP_M]
+        lanes = [ln for ln in self.lanes.lanes_near(px, pz, self.spec.spawn_m)
+                 if ln.length > 2.0 * self.spec.gap_m]
         if not lanes:
             return None
         lane = self.rng.choice(lanes)
-        s = self.rng.uniform(config.TRAFFIC_GAP_M, lane.length - config.TRAFFIC_GAP_M)
+        s = self.rng.uniform(self.spec.gap_m, lane.length - self.spec.gap_m)
         pos, _ = lane.at(s)
         d = math.hypot(pos[0] - px, pos[2] - pz)
-        if not config.TRAFFIC_SPAWN_MIN_M <= d <= config.TRAFFIC_SPAWN_M:
+        if not self.spec.spawn_min_m <= d <= self.spec.spawn_m:
             return None
-        if any(c.lane is lane and abs(c.s - s) < 3.0 * config.TRAFFIC_GAP_M for c in self.cars):
+        if any(c.lane is lane and abs(c.s - s) < 3.0 * self.spec.gap_m for c in self.cars):
             return None
         self._ids += 1
-        cruise = config.TRAFFIC_SPEED_MS * self.rng.uniform(0.8, 1.1)
+        cruise = self.spec.speed_ms * self.rng.uniform(0.8, 1.1)
         car = Car(self._ids, lane, s, cruise, cruise, self.rng.choice(TINTS))
         self.cars.append(car)
         log.debug("[traffic] car %d on %s at %.0f m, %d cars", car.id, lane.key, d,
@@ -108,7 +122,7 @@ class Traffic:
         keep = []
         for c in self.cars:
             pos, _ = c.lane.at(c.s)
-            if math.hypot(pos[0] - px, pos[2] - pz) <= config.TRAFFIC_DESPAWN_M:
+            if math.hypot(pos[0] - px, pos[2] - pz) <= self.spec.despawn_m:
                 keep.append(c)
         self.cars = keep
         if len(self.cars) < self.max_cars:
@@ -127,8 +141,8 @@ class Traffic:
             ahead = lane.length - c.s
             want = min(want, slow + max(ahead - 10.0, 0.0) * 0.5)
         gap = self._gap(c)
-        want = min(want, max(0.0, (gap - config.TRAFFIC_GAP_M) * 0.8))
-        rate = config.TRAFFIC_ACCEL if want > c.speed else config.TRAFFIC_BRAKE
+        want = min(want, max(0.0, (gap - self.spec.gap_m) * 0.8))
+        rate = self.spec.accel if want > c.speed else self.spec.brake
         c.speed += max(-rate * dt, min(rate * dt, want - c.speed))
         c.s += c.speed * dt
         while c.s > c.lane.length:

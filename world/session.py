@@ -21,9 +21,9 @@ from pathlib import Path
 import config
 from core.car_profile import load_cosmetics
 from core.redriver2_physics import PhysicsWorld, Vehicle
-from world.chunks import chunks_around
 from world.save import SaveState, free_path, read_save, write_save
 from world.world import World
+from worldgen.chunk import chunks_around
 
 log = logging.getLogger(__name__)
 
@@ -41,12 +41,12 @@ class Explorer:
 
     def visit(self, x, z):
         """Mark the chunks round (x, z); returns the newly discovered ones."""
-        size = config.TERRAIN_CHUNK_SIZE
+        size = self.world.spec.chunk_size_m
         here = (math.floor(x / size), math.floor(z / size))
         if here == self._last:
             return []
         self._last = here
-        new = [k for k in chunks_around(x, z, self.radius) if k not in self.discovered]
+        new = [k for k in chunks_around(x, z, self.radius, size) if k not in self.discovered]
         for ci, ck in new:
             self.discovered.add((ci, ck))
             self.biomes.add(self.world.regions.biome_at((ci + 0.5) * size,

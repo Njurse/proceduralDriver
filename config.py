@@ -18,23 +18,21 @@ CAR_MODEL_INVERT_VERTICAL = False
 HAVANA_HANDLING_JSON = (ASSETS / "vehicle" / "havana_model0" / "handling.json").as_posix()
 HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.obj").as_posix()
 
-# Procedural terrain (world/terrain.py, world/chunks.py) --------------------
+# Procedural terrain (worldgen/, game/world_view.py) --------------------
 # Rolling hills: Perlin fBm, height = AMPLITUDE * fbm(x / SCALE, z / SCALE).
 TERRAIN_SEED = 1977
-TERRAIN_SCALE = 140.0           # metres per noise cell of the first octave
-TERRAIN_OCTAVES = 4
-TERRAIN_AMPLITUDE = 10.0        # metres; hills reach about +-5 m, slopes under 10 deg
 TERRAIN_CHUNK_SIZE = 64.0       # metres per square chunk
 TERRAIN_CHUNK_RES = 32          # quads per chunk side (2 m spacing)
 DRAW_DISTANCE_M = 290.0         # camera far plane (was ~190 m: 3 chunks of terrain)
 # chunks kept loaded in each direction round the car: enough to reach the far plane
 TERRAIN_VIEW_CHUNKS = math.ceil(DRAW_DISTANCE_M / TERRAIN_CHUNK_SIZE)
-TERRAIN_BUILDS_PER_FRAME = 2    # chunk meshes built per frame while streaming
+TERRAIN_BUILDS_PER_FRAME = 2    # streaming steps a frame at most (a chunk's ground, its roads)
+TERRAIN_BUILD_MS = 4.0          # and no more once this is spent (always one)
 SKYBOX_PNG = (ASSETS / "world" / "landscape" / "skybox.png").as_posix()
 SKY_RADIUS_M = 250.0            # sky dome radius, inside the far plane
 DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far plane
 
-# Biomes, regions and roads (world/biomes.py, world/regions.py, world/roads.py)
+# Biomes, regions and roads (worldgen/)
 WORLD_BIOMES = ("plains", "desert", "canyon", "coastal_beach", "jungle", "treacherous",
                 "village", "metropolis", "british_town")  # assets/world/definitions/<name>.json
 REGION_SCALE_M = 900.0          # spacing of the region sites that splotch the biomes
@@ -44,7 +42,7 @@ ROAD_MIN_JUNCTION_DEG = 45.0     # no two roads leave a junction closer than thi
 ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
 ROAD_DETAIL_TILE_M = 2.5        # metres per repeat of the road detail texture
 
-# Traffic (world/traffic.py, game/traffic_view.py); TRAFFIC_MAX = 0 turns it off
+# Traffic (worldgen/traffic.py via world/spec.py, game/traffic_view.py); TRAFFIC_MAX = 0 turns it off
 TRAFFIC_MAX = 12                # cars at once
 TRAFFIC_SPEED_MS = 12.0         # cruising speed (each car 0.8-1.1x)
 TRAFFIC_SPAWN_MIN_M = 60.0      # cars appear between these distances from the player
@@ -62,7 +60,7 @@ MINIMAP_SIZE_PX = 200           # on-screen size, top right
 MINIMAP_TEXTURE_PX = 200        # map image pixels: 1:1 with the screen
 MINIMAP_ZOOMS = (16, 4)         # map pixels per chunk: near (12.5 chunks across), far (50)
 MINIMAP_REFRESH_FRAMES = 10     # redraw the map image at most this often
-MINIMAP_TILES_PER_FRAME = 2     # chunk tiles sampled per frame for the map
+MINIMAP_TILES_PER_FRAME = 1     # chunk tiles sampled per frame for the map
 
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in

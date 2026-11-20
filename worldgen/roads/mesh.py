@@ -1,7 +1,7 @@
 """Road strips for a chunk: a quad per segment, a round fan on the outside
 of each bend (the flattened ground is round there too, so a sharp corner
 neither narrows nor lets the shoulder poke through), plus dashed centre
-markings, as numpy arrays (world.chunks turns them into Panda3D geometry)."""
+markings, as numpy arrays (game/world_view.py turns them into Panda3D geometry)."""
 
 import math
 

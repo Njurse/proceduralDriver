@@ -28,6 +28,7 @@ from core.units import (
     dr2_length,
     dr2_velocity,
 )
+from worldgen.ground import SURFACE_GRASS, SURFACE_ROAD
 
 F = C_FRAME_HZ
 UP = np.array([0.0, 1.0, 0.0])
@@ -77,9 +78,6 @@ LIFT_FRICTION_LIMIT = tuple(dr2_velocity(v) for v in (1005, 6030, 1005, 5025, 18
 # 12/32 (the hard-cop value): with 19/32 the car still rolled over at full
 # lock from 50 m/s, a speed the 200+ km/h gearing now reaches.
 TYRE_LEVER_SCALE = np.array([1.0, 12.0 / 32.0, 1.0])
-SURFACE_ROAD = 0
-SURFACE_GRASS = 1
-SURFACE_OFFROAD = 2  # open ground off the roads; drives like the road for now
 
 
 def lateral_stiffness(speed: float) -> float:

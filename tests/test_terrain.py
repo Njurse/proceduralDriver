@@ -1,4 +1,4 @@
-"""The procedural terrain (world/terrain.py) and its chunk meshes (world/chunks.py)."""
+"""The procedural terrain (worldgen/height.py) and its chunk meshes (worldgen/chunk.py)."""
 
 import math
 import os
@@ -13,18 +13,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
 from core.car_profile import load_cosmetics  # noqa: E402
 from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
-from world.chunks import ChunkStreamer, chunk_mesh, chunks_around  # noqa: E402
-from world.ground import Ground  # noqa: E402
-from world.terrain import Terrain  # noqa: E402
+from game.world_view import ChunkStreamer  # noqa: E402
+from world.spec import world_spec  # noqa: E402
+from worldgen.chunk import chunk_mesh, chunks_around  # noqa: E402
+from worldgen.ground import Ground  # noqa: E402
+from worldgen.height import Terrain  # noqa: E402
 
 DT = 1.0 / 60.0
 RNG = np.random.default_rng(5)
 PTS = RNG.uniform(-5000.0, 5000.0, (200, 2))
 
+SPEC = world_spec(biomes=())  # chunk size and res
+
 
 @pytest.fixture(scope="module")
 def terrain():
-    return Terrain()
+    return Terrain(seed=config.TERRAIN_SEED)
 
 
 def _inp(steer=0.0, throttle=0.0, handbrake=False):
@@ -70,16 +74,16 @@ def test_hills_are_gentle_and_a_few_metres_high(terrain):
     gx, gz = np.meshgrid(xs, xs)
     h, dhx, dhz = terrain.sample(gx, gz)
     slope = np.degrees(np.arctan(np.hypot(dhx, dhz)))
-    assert 2.0 < h.max() < config.TERRAIN_AMPLITUDE
-    assert -config.TERRAIN_AMPLITUDE < h.min() < -2.0
+    assert 2.0 < h.max() < terrain.amplitude
+    assert -terrain.amplitude < h.min() < -2.0
     assert slope.max() < 15.0
 
 
 @pytest.mark.parametrize("a,b,axis", [((0, 0), (1, 0), "x"), ((0, 0), (0, 1), "z"),
                                       ((-1, -3), (0, -3), "x"), ((5, -1), (5, 0), "z")])
 def test_no_seams_between_chunks(terrain, a, b, axis):
-    res = config.TERRAIN_CHUNK_RES
-    ma, mb = chunk_mesh(terrain, *a), chunk_mesh(terrain, *b)
+    res = SPEC.chunk_res
+    ma, mb = chunk_mesh(terrain, *a, SPEC), chunk_mesh(terrain, *b, SPEC)
     grid = (res + 1, res + 1)  # rows run along z, columns along x
     pa, pb = ma.pos.reshape(grid + (3,)), mb.pos.reshape(grid + (3,))
     na, nb = ma.normal.reshape(grid + (3,)), mb.normal.reshape(grid + (3,))
@@ -92,14 +96,14 @@ def test_no_seams_between_chunks(terrain, a, b, axis):
 
 
 def test_chunk_mesh_lies_on_the_terrain(terrain):
-    m = chunk_mesh(terrain, 3, -2)
+    m = chunk_mesh(terrain, 3, -2, SPEC)
     x, z = m.pos[:, 0], m.pos[:, 2]
     assert np.allclose(m.pos[:, 1], terrain.height(x, z))
     assert np.allclose(m.normal, terrain.normal(x, z))
-    size = config.TERRAIN_CHUNK_SIZE
+    size = SPEC.chunk_size_m
     assert x.min() == 3 * size and x.max() == 4 * size
     assert z.min() == -2 * size and z.max() == -1 * size
-    res = config.TERRAIN_CHUNK_RES
+    res = SPEC.chunk_res
     assert len(m.tris) == 2 * res * res and m.tris.max() == len(m.pos) - 1
 
 
@@ -107,12 +111,13 @@ def test_chunks_stream_round_the_car(terrain):
     from panda3d.core import NodePath
 
     root = NodePath("root")
-    s = ChunkStreamer(terrain, root, radius=2, builds_per_frame=3)
+    s = ChunkStreamer(terrain, root, radius=2, builds_per_frame=3, build_ms=math.inf,
+                      spec=SPEC)
     assert s.update(10.0, 10.0) == 3
     assert (0, 0) in s.loaded  # the chunk under the car comes first
     s.update(10.0, 10.0, budget=100)
-    assert set(s.loaded) == set(chunks_around(10.0, 10.0, 2)) and len(s.loaded) == 25
-    far = 10 * config.TERRAIN_CHUNK_SIZE
+    assert set(s.loaded) == set(chunks_around(10.0, 10.0, 2, SPEC.chunk_size_m)) and len(s.loaded) == 25
+    far = 10 * SPEC.chunk_size_m
     s.update(far, 0.0, budget=100)
     assert (0, 0) not in s.loaded and len(s.loaded) == 25
     assert s.root.getNumChildren() == 25

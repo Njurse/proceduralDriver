@@ -4,11 +4,11 @@ A definition may carry any fields of its own (kept in ``Biome.extra``); the
 generator reads two sections and fills every missing key from the defaults
 below:
 
-``terrain``  the biome's height field (world.terrain.Terrain: fbm, ridged
+``terrain``  the biome's height field (worldgen.height.Terrain: fbm, ridged
              or terraced noise) and the colour ramp its chunks are painted with
 ``roads``    the roads the biome grows (world.roads), with
              optional dashed centre ``markings``
-``weight``   (top level) how often world.regions picks the biome for a region
+``weight``   (top level) how often worldgen.regions picks the biome for a region
 ``region_size`` (top level) the biome claims blocks of this many x this many
              region sites, so 3 makes regions about three times as wide
 
@@ -22,10 +22,6 @@ import dataclasses
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-
-import config
-
-DEFINITIONS_DIR = config.ASSETS / "world" / "definitions"
 
 # Every road surface drives like tarmac for now (core.car_forces only treats
 # grass differently); the name is there for when the tyres learn about sand.
@@ -175,8 +171,9 @@ def _section(cls, raw, where):
     return cls(**values)
 
 
-def parse_biome(data, where="biome", default_name="biome"):
-    """A Biome from a decoded definition (a dict)."""
+def parse_biome(data, where="biome", default_name="biome", assets_dir=None):
+    """A Biome from a decoded definition (a dict).  With ``assets_dir`` the
+    detail texture must exist under it."""
     if not isinstance(data, dict):
         raise ValueError(f"{where}: expected a JSON object at the top level")
     name = data.get("name", default_name)
@@ -193,7 +190,7 @@ def parse_biome(data, where="biome", default_name="biome"):
     if roads.jitter_m > 0.2 * roads.grid_spacing_m:
         raise ValueError(f"{where}.roads.jitter_m: {roads.jitter_m} is more than a fifth "
                          f"of grid_spacing_m ({roads.grid_spacing_m})")
-    if not (config.ASSETS / terrain.detail_texture).is_file():
+    if assets_dir is not None and not (Path(assets_dir) / terrain.detail_texture).is_file():
         raise ValueError(f"{where}.terrain.detail_texture: no file assets/"
                          f"{terrain.detail_texture}")
     weight = _value(where, "weight", data.get("weight", 1.0), 1.0)
@@ -204,9 +201,9 @@ def parse_biome(data, where="biome", default_name="biome"):
                  region_size=size)
 
 
-def load_biome(name):
-    """Load ``assets/world/definitions/<name>.json`` (or a path to a .json)."""
-    path = Path(name) if str(name).endswith(".json") else DEFINITIONS_DIR / f"{name}.json"
+def load_biome(name, definitions_dir, assets_dir=None):
+    """Load ``<definitions_dir>/<name>.json`` (or a path to a .json)."""
+    path = Path(name) if str(name).endswith(".json") else Path(definitions_dir) / f"{name}.json"
     text = path.read_text(encoding="utf-8")
     if not text.strip():
         raise ValueError(f"{path.name}: empty definition (no terrain or roads rules yet)")
@@ -214,9 +211,9 @@ def load_biome(name):
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{path.name}: not valid JSON ({exc})") from exc
-    return parse_biome(data, path.name, path.stem)
+    return parse_biome(data, path.name, path.stem, assets_dir)
 
 
-def load_biomes(names=None):
-    """The world's biomes, config.WORLD_BIOMES by default."""
-    return tuple(load_biome(n) for n in (config.WORLD_BIOMES if names is None else names))
+def load_biomes(names, definitions_dir, assets_dir=None):
+    """The named biomes, in order."""
+    return tuple(load_biome(n, definitions_dir, assets_dir) for n in names)

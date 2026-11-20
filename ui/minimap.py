@@ -57,6 +57,7 @@ class Minimap:
         self.frame = 0
         self._dirty = True
         self._last = None
+        self._backlog = ((), [])   # (car chunk, zoom, n discovered), tiles still to sample
         self.cache = TileCache(world, max(config.MINIMAP_ZOOMS))
         self.texture = _to_texture(np.zeros((self.tex_px, self.tex_px, 3), np.uint8),
                                    "minimap")
@@ -87,6 +88,7 @@ class Minimap:
     def toggle_zoom(self):
         self.zoom = (self.zoom + 1) % len(config.MINIMAP_ZOOMS)
         self._dirty = True
+        self._backlog = ((), [])
 
     def show(self, visible):
         (self.root.show if visible else self.root.hide)()
@@ -95,19 +97,28 @@ class Minimap:
         """Per frame: turn the arrow, sample a few chunk tiles, and redraw the
         map image when due and something changed (or ``force``)."""
         self.arrow.setR(math.degrees(heading))
-        size = config.TERRAIN_CHUNK_SIZE
+        size = self.cache.world.spec.chunk_size_m
         ci, ck = math.floor(pos[0] / size), math.floor(pos[1] / size)
         todo = sorted((k for k in loaded if k not in self.cache.tiles),
                       key=lambda k: (k[0] - ci) ** 2 + (k[1] - ck) ** 2)
         built = self.cache.build(todo, config.MINIMAP_TILES_PER_FRAME)
+        ppc = config.MINIMAP_ZOOMS[self.zoom]
         if not built and not todo:
-            seen = sorted((k for k in discovered if k not in self.cache.tiles
-                           and abs(k[0] - ci) < 40 and abs(k[1] - ck) < 40),
-                          key=lambda k: (k[0] - ci) ** 2 + (k[1] - ck) ** 2)
+            # discovered chunks the map can show, listed once per car chunk
+            # rather than scanning every discovered chunk each frame
+            state = ((ci, ck), self.zoom, len(discovered))
+            if self._backlog[0] != state:
+                r = self.tex_px // (2 * ppc) + 1
+                self._backlog = (state, sorted(
+                    (k for k in discovered if k not in self.cache.tiles
+                     and abs(k[0] - ci) <= r and abs(k[1] - ck) <= r),
+                    key=lambda k: (k[0] - ci) ** 2 + (k[1] - ck) ** 2))
+            seen = self._backlog[1]
             built = self.cache.build(seen, config.MINIMAP_TILES_PER_FRAME)
+            while seen and seen[0] in self.cache.tiles:
+                del seen[0]
         self._dirty |= bool(built)
         self.frame += 1
-        ppc = config.MINIMAP_ZOOMS[self.zoom]
         mpp = size / ppc
         state = (round(pos[0] / mpp), round(pos[1] / mpp), len(loaded), len(discovered))
         self._dirty |= state != self._last

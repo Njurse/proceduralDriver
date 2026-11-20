@@ -1,6 +1,6 @@
 """Seeded rolling hills: 2D gradient (Perlin) noise summed in fBm octaves.
 
-``Terrain`` is a world.ground.Ground.  Heights and normals are analytic (the
+``Terrain`` is a worldgen.ground.Ground.  Heights and normals are analytic (the
 noise returns its own gradient), so the physics, the chunk meshes and the
 normals all agree exactly.  Every function takes scalars (the physics path,
 plain Python for speed) or numpy arrays (the mesh path) of x/z in metres.
@@ -10,8 +10,7 @@ import math
 
 import numpy as np
 
-import config
-from world.ground import SampledGround
+from worldgen.ground import SampledGround
 
 _GRADIENTS = 16          # unit gradient directions, evenly spaced
 LACUNARITY = 2.0         # frequency step per octave
@@ -48,13 +47,13 @@ class Terrain(SampledGround):
     Heights and gradients stay analytic for all three.
     """
 
-    def __init__(self, seed=None, scale=None, octaves=None, amplitude=None,
+    def __init__(self, seed, scale=140.0, octaves=4, amplitude=10.0,
                  persistence=PERSISTENCE, lacunarity=LACUNARITY, base_height=0.0,
                  noise_type="fbm", terrace_steps=6, terrace_ramp=0.35):
-        self.seed = config.TERRAIN_SEED if seed is None else int(seed)
-        self.scale = float(config.TERRAIN_SCALE if scale is None else scale)
-        self.octaves = int(config.TERRAIN_OCTAVES if octaves is None else octaves)
-        self.amplitude = float(config.TERRAIN_AMPLITUDE if amplitude is None else amplitude)
+        self.seed = int(seed)
+        self.scale = float(scale)
+        self.octaves = int(octaves)
+        self.amplitude = float(amplitude)
         self.persistence = float(persistence)
         self.lacunarity = float(lacunarity)
         self.base_height = float(base_height)

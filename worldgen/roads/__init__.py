@@ -6,19 +6,22 @@
 
 ``RoadNetwork`` caches a few super-cell graphs (LRU), builds roads lazily
 behind a tile index, and keeps a 32 m tile hash of segments so the physics
-query only measures the segments within reach.
+query only measures the segments within reach.  ``prefetch`` builds the
+super-cells the car is heading for on a worker thread, so streaming rarely
+waits for one.
 """
 
 import logging
 import math
+import threading
 from collections import OrderedDict
 
 import numpy as np
 
-from world.roads import layout, mesh
-from world.roads.layout import SUPER_M
-from world.roads.mesh import MARKING_HALF_WIDTH, MARKING_LIFT
-from world.roads.road import SEGMENT_M, Road, blend, blend_point, build
+from worldgen.roads import layout, mesh
+from worldgen.roads.layout import SUPER_M
+from worldgen.roads.mesh import MARKING_HALF_WIDTH, MARKING_LIFT
+from worldgen.roads.road import SEGMENT_M, Road, blend, blend_point, build
 
 __all__ = ["MARKING_HALF_WIDTH", "MARKING_LIFT", "SEGMENT_M", "Road", "RoadNetwork"]
 
@@ -27,33 +30,60 @@ log = logging.getLogger(__name__)
 _TILE_M = 256.0          # road index tile
 _SEG_TILE_M = 32.0       # segment hash tile
 _MARGIN_M = 1400.0       # a stitch road strays this far into the next super-cell
-_GRAPHS, _CELLS = 12, 6  # super-cells kept
+_GRAPHS, _CELLS = 16, 9  # super-cells kept: a 3 x 3 block and its stitch neighbours
+
+
+_AHEAD_M = 600.0         # prefetch: super-cells a query this much farther out needs
+_LOCK = threading.Lock()  # guards the LRU caches, not the builds
 
 
 def _lru(cache, key, make, limit):
-    if key in cache:
+    with _LOCK:
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+    value = make()   # unlocked: the worker and the game may both build one (same result)
+    with _LOCK:
+        cache[key] = value
         cache.move_to_end(key)
-        return cache[key]
-    value = cache[key] = make()
-    if len(cache) > limit:
-        cache.popitem(last=False)
+        while len(cache) > limit:
+            cache.popitem(last=False)
     return value
 
 
 class RoadNetwork:
-    """The roads over a world.regions.Regions."""
+    """The roads of a WorldSpec over its worldgen.regions.Regions."""
 
-    def __init__(self, regions, seed=None):
-        self.regions = regions
-        self.seed = regions.seed if seed is None else int(seed)
+    def __init__(self, spec, regions):
+        self.spec, self.regions = spec, regions
+        self.seed = spec.seed
+        self.min_junction_deg = spec.roads.min_junction_deg
         self._graphs, self._cells = OrderedDict(), OrderedDict()
         self._roads, self._segs = {}, {}
         self._reach = max(0.5 * b.roads.width_m + b.roads.shoulder_m for b in regions.biomes)
+        self._worker = None
+
+    def prefetch(self, x, z, r):
+        """Start building, on a worker thread, the super-cells a query
+        within r + _AHEAD_M of (x, z) will need (at most 3 x 3 of them, so
+        the LRU keeps them all); no-op while one is running."""
+        if self._worker is not None and self._worker.is_alive():
+            return
+        r += _AHEAD_M + _MARGIN_M
+        want = [(ci, cj)
+                for ci in range(math.floor((x - r) / SUPER_M), math.floor((x + r) / SUPER_M) + 1)
+                for cj in range(math.floor((z - r) / SUPER_M), math.floor((z + r) / SUPER_M) + 1)]
+        missing = [c for c in want if c not in self._cells]
+        if missing:
+            self._worker = threading.Thread(
+                target=lambda: [self._cell(*c) for c in missing], name="road-prefetch",
+                daemon=True)
+            self._worker.start()
 
     def graph(self, ci, cj):
         """layout.Graph of super-cell (ci, cj)."""
         def make():
-            g = layout.grow(self.regions, self.seed, ci, cj)
+            g = layout.grow(self.regions, self.seed, ci, cj, self.min_junction_deg)
             log.info("super-cell (%d, %d): %d nodes (%d grid), %d edges in %.0f ms",
                      ci, cj, len(g.x), int(g.grid.sum()), len(g.edges), g.ms)
             return g
@@ -68,7 +98,7 @@ class RoadNetwork:
             for axis, nb in ((0, (ci + 1, cj)), (1, (ci, cj + 1))):
                 pairs += [((ci, cj, a), (*nb, b)) for a, b in
                           layout.stitch(ga, self.graph(*nb), axis, nb[axis] * SUPER_M,
-                                       self.seed)]
+                                       self.seed, self.min_junction_deg)]
             tiles, r = {}, self._reach
             for ra, rb in pairs:
                 ra, rb = min(ra, rb), max(ra, rb)

@@ -1,12 +1,12 @@
-"""Draws world.traffic: instances of the player's car model, tinted."""
+"""Draws worldgen.traffic: instances of the player's car model, tinted."""
 
 import logging
 
-from panda3d.core import NodePath
+from panda3d.core import Mat4, NodePath
 
 from core.mathutil import clamp
-from game.car_view import PHYS_TO_PANDA, _mat4
-from world.traffic import Traffic
+from world.spec import traffic_spec
+from worldgen.traffic import Traffic
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,12 @@ class TrafficView:
                 self.template.instanceTo(node)
                 node.setColorScale(*c.tint, 1.0)
             pos, rot = c.pose()
-            node.setMat(_mat4(PHYS_TO_PANDA @ rot, PHYS_TO_PANDA @ (pos + rot[:, 1] * self.ride_m)))
+            (r0, u0, f0), (r1, u1, f1), (r2, u2, f2) = rot.tolist()
+            x, y, z = pos.tolist()
+            k = self.ride_m
+            # _mat4(PHYS_TO_PANDA @ rot, ...) written out: physics (x, y up, z) -> Panda (x, z, y)
+            node.setMat(Mat4(r0, r2, r1, 0.0, u0, u2, u1, 0.0, f0, f2, f1, 0.0,
+                             x + u0 * k, z + u2 * k, y + u1 * k, 1.0))
             live.add(c.id)
         for cid in [k for k in self.nodes if k not in live]:
             self.nodes.pop(cid).removeNode()
@@ -54,7 +59,7 @@ class TrafficDraw:
         if self.traffic is None or self.traffic.world is not world:
             if self.traffic_view is not None:
                 self.traffic_view.destroy()
-            self.traffic = Traffic(world, seed=self.session.seed)
+            self.traffic = Traffic(world, traffic_spec(), seed=self.session.seed)
             ride = clamp(v.pos[1] - world.height(v.pos[0], v.pos[2]), 0.3, 1.5)
             self.traffic_view = TrafficView(self.render, self.car, self.wheel_mounts, ride)
             log.info("[traffic] up to %d cars, ride height %.2f m", self.traffic.max_cars, ride)

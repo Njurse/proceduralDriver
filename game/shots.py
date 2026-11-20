@@ -128,7 +128,8 @@ def biome_shots(game, out_dir, frames=90):
     _save_shot(game, os.path.join(out_dir, "roads_overview_biomes.png"))
     # 64 x 64 chunks (4 km) round the car at 4 m a pixel, whatever was driven
     v = game.vehicle
-    ci, ck = int(v.pos[0] // config.TERRAIN_CHUNK_SIZE), int(v.pos[2] // config.TERRAIN_CHUNK_SIZE)
+    size = world.spec.chunk_size_m
+    ci, ck = int(v.pos[0] // size), int(v.pos[2] // size)
     square = {(ci + i, ck + k) for i in range(-32, 32) for k in range(-32, 32)}
     path, size = export_world(world, square, os.path.join(out_dir, "world_export_biomes.png"),
                               m_per_px=4.0)

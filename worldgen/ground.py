@@ -13,7 +13,11 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from core.car_forces import SURFACE_ROAD
+# What the ground is made of: the physics (core.car_forces) drives on these.
+SURFACE_ROAD = 0
+SURFACE_GRASS = 1
+SURFACE_OFFROAD = 2  # open ground off the roads; drives like the road for now
+
 
 
 @runtime_checkable

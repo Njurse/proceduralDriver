@@ -1,16 +1,15 @@
-"""Streams the terrain as square chunk meshes round the car.
+"""The world in Panda3D: streams worldgen chunk meshes round the car.
 
-``chunk_mesh`` is pure numpy (tested without Panda); ``ChunkStreamer`` turns
-meshes into Panda3D GeomNodes, building the nearest missing chunks first and
-dropping chunks that fall out of range.  A ground with a ``road_mesh(ci, ck)``
-(world.world.World) gets its road strips added to each chunk.  Chunk (i, k) covers physics x in
-[i * size, (i + 1) * size] and z in [k * size, (k + 1) * size].
+``ChunkStreamer`` turns worldgen.chunk meshes into GeomNodes, building the
+nearest missing chunks first and dropping chunks that fall out of range.  A
+ground with a ``road_mesh(ci, ck)`` (world.world.World) gets its road strips
+added to each chunk.  The detail textures that modulate the vertex colours
+live here too.
 """
 
 import logging
 import math
 import time
-from dataclasses import dataclass
 
 import numpy as np
 from panda3d.core import (
@@ -28,85 +27,9 @@ from panda3d.core import (
 import config
 from core.noise import fbm_2d
 from core.textures import _to_texture
+from worldgen.chunk import chunk_mesh, chunks_around
 
 log = logging.getLogger(__name__)
-
-DETAIL_TILE_M = 8.0      # metres per repeat of the detail texture
-
-# Vertex colours by height (fraction of amplitude) and steepness.
-_LOW = np.array([0.14, 0.28, 0.10])    # valley floor
-_MID = np.array([0.32, 0.47, 0.19])    # grass
-_HIGH = np.array([0.66, 0.60, 0.33])   # dry hilltops
-_STEEP = np.array([0.48, 0.38, 0.25])  # bare earth on the steeper slopes
-
-
-@dataclass
-class ChunkMesh:
-    """Vertices in physics coordinates (x, y up, z)."""
-
-    pos: np.ndarray      # (n, 3)
-    normal: np.ndarray   # (n, 3)
-    color: np.ndarray    # (n, 4)
-    uv: np.ndarray       # (n, 2)
-    tris: np.ndarray     # (m, 3) vertex indices
-
-
-def terrain_colors(height, normal, amplitude, ramp=None, steep_deg=11.0):
-    """RGBA per vertex from height (m above the base level) and unit normals
-    (..., 3).  ``ramp`` has low/mid/high/steep RGB (world.biomes.ColorRamp);
-    slopes blend to ``steep`` over steep_deg +- 2.2 degrees."""
-    low, mid, high, steep_rgb = ((_LOW, _MID, _HIGH, _STEEP) if ramp is None else
-                                 (np.asarray(c) for c in (ramp.low, ramp.mid, ramp.high,
-                                                          ramp.steep)))
-    t = np.clip(np.asarray(height) / (0.5 * max(amplitude, 1e-6)), -1.0, 1.0)[..., None]
-    lo = mid + (low - mid) * np.clip(-t, 0.0, 1.0)
-    rgb = lo + (high - mid) * np.clip(t, 0.0, 1.0)
-    c0, c1 = (math.cos(math.radians(steep_deg + d)) for d in (-2.2, 2.2))
-    steep = np.clip((c0 - normal[..., 1:2]) / (c0 - c1), 0.0, 1.0)
-    rgb = rgb + (steep_rgb - rgb) * steep
-    alpha = np.ones(rgb.shape[:-1] + (1,))
-    return np.concatenate([rgb, alpha], axis=-1)
-
-
-def chunk_mesh(terrain, ci, ck, size=None, res=None):
-    """Grid mesh of chunk (ci, ck): (res + 1)^2 vertices, 2 res^2 triangles.
-
-    Vertex x/z are computed as (chunk * res + index) * step so neighbouring
-    chunks produce bit-identical edge vertices.
-    """
-    size = float(config.TERRAIN_CHUNK_SIZE if size is None else size)
-    res = int(config.TERRAIN_CHUNK_RES if res is None else res)
-    step = size / res
-    idx = np.arange(res + 1)
-    gx, gz = np.meshgrid((ci * res + idx) * step, (ck * res + idx) * step)
-    x, z = gx.ravel(), gz.ravel()
-    h, dhx, dhz = terrain.sample(x, z)
-    n = np.stack([-dhx, np.ones_like(h), -dhz], axis=-1)
-    n /= np.linalg.norm(n, axis=-1, keepdims=True)
-    pos = np.stack([x, h, z], axis=-1)
-    if hasattr(terrain, "colors"):  # biome-aware grounds paint themselves
-        color = terrain.colors(x, z, h, n)
-    else:
-        color = terrain_colors(h, n, terrain.amplitude)
-    tile = getattr(terrain, "detail_tile_m", DETAIL_TILE_M)
-
-    row = res + 1
-    q = (np.arange(res)[:, None] * row + np.arange(res)[None, :]).ravel()
-    # two triangles per quad, counter-clockwise seen from above in Panda's
-    # (x, y = physics z, z up) frame, so the top faces survive back-face culling
-    tris = np.concatenate([np.stack([q, q + 1, q + row], axis=-1),
-                           np.stack([q + 1, q + row + 1, q + row], axis=-1)])
-    return ChunkMesh(pos=pos, normal=n, color=color,
-                     uv=np.stack([x, z], axis=-1) / tile, tris=tris)
-
-
-def chunks_around(x, z, radius, size=None):
-    """Chunk keys within ``radius`` chunks of the one under (x, z), nearest first."""
-    size = float(config.TERRAIN_CHUNK_SIZE if size is None else size)
-    ci, ck = math.floor(x / size), math.floor(z / size)
-    keys = [(ci + di, ck + dk) for di in range(-radius, radius + 1)
-            for dk in range(-radius, radius + 1)]
-    return sorted(keys, key=lambda k: (k[0] - ci) ** 2 + (k[1] - ck) ** 2)
 
 
 def _noise_tile(size, seed, frequency, lo, hi):
@@ -193,8 +116,9 @@ class ChunkStreamer:
     """Keeps the chunks round a moving point loaded under ``parent``."""
 
     def __init__(self, terrain, parent, texture=None, road_texture=None, radius=None,
-                 builds_per_frame=None):
+                 builds_per_frame=None, build_ms=None, spec=None):
         self.terrain = terrain
+        self.spec = terrain.spec if spec is None else spec   # chunk size and res
         self.road_texture = road_texture
         self.root = parent.attachNewNode("terrain")
         if texture is not None:
@@ -202,7 +126,9 @@ class ChunkStreamer:
         self.radius = int(config.TERRAIN_VIEW_CHUNKS if radius is None else radius)
         self.budget = int(config.TERRAIN_BUILDS_PER_FRAME if builds_per_frame is None
                           else builds_per_frame)
+        self.build_ms = float(config.TERRAIN_BUILD_MS if build_ms is None else build_ms)
         self.loaded = {}
+        self._roadless = set()      # loaded, road strips still to add (a step of their own)
         self._batch = [0, 0.0, 0]   # built, ms, dropped since the last summary
 
     def reset(self, terrain):
@@ -210,48 +136,67 @@ class ChunkStreamer:
         for node in self.loaded.values():
             node.removeNode()
         self.loaded.clear()
+        self._roadless.clear()
         self.terrain = terrain
+        self.spec = terrain.spec
 
     def update(self, x, z, budget=None):
         """Build up to ``budget`` (default TERRAIN_BUILDS_PER_FRAME) missing
         chunks, nearest first, and drop chunks more than radius + 1 away.
-        Returns the number built."""
+        Per frame (no ``budget``) a chunk's ground and its road strips are
+        separate steps, and building stops once ``build_ms`` is spent, so
+        streaming costs about one step a frame.  Returns the steps taken."""
+        per_frame = budget is None
+        stop = time.perf_counter() + self.build_ms / 1000.0 if per_frame else math.inf
         budget = self.budget if budget is None else budget
-        wanted = chunks_around(x, z, self.radius)
-        built = 0
-        for key in wanted:
-            if key in self.loaded:
+        roads = getattr(self.terrain, "roads", None)
+        if roads is not None:
+            roads.prefetch(x, z, (self.radius + 1) * self.spec.chunk_size_m)
+        has_roads = hasattr(self.terrain, "road_mesh")
+        built, left = 0, False
+        for key in chunks_around(x, z, self.radius, self.spec.chunk_size_m):
+            fresh = key not in self.loaded
+            if not fresh and key not in self._roadless:
                 continue
-            if built >= budget:
+            if built >= budget or time.perf_counter() >= stop:
+                left = True
                 break
             t0 = time.perf_counter()
-            name = f"chunk_{key[0]}_{key[1]}"
-            chunk = self.root.attachNewNode(mesh_node(chunk_mesh(self.terrain, *key), name))
-            roads = (self.terrain.road_mesh(*key) if hasattr(self.terrain, "road_mesh")
-                     else None)
-            if roads is not None:
-                road_node = chunk.attachNewNode(mesh_node(roads, name + "_roads"))
-                if self.road_texture is not None:
-                    # roads tile their own finer, higher-contrast noise
-                    road_node.setTexture(self.road_texture, 1)
-                # just above the flattened ground, and drawn over it where
-                # the depth buffer can't tell them apart
-                road_node.setDepthOffset(1)
-            self.loaded[key] = chunk
+            if fresh:
+                name = f"chunk_{key[0]}_{key[1]}"
+                self.loaded[key] = self.root.attachNewNode(
+                    mesh_node(chunk_mesh(self.terrain, *key, self.spec), name))
+                self._batch[0] += 1
+                if has_roads:
+                    self._roadless.add(key)
+            if key in self._roadless and not (fresh and per_frame):
+                self._roadless.discard(key)
+                self._add_roads(key)
             built += 1
-            ms = (time.perf_counter() - t0) * 1000.0
-            self._batch[0] += 1
-            self._batch[1] += ms
-            log.debug("chunk %s built in %.1f ms (roads: %s)", key, ms, roads is not None)
-        size = config.TERRAIN_CHUNK_SIZE
+            self._batch[1] += (time.perf_counter() - t0) * 1000.0
+        size = self.spec.chunk_size_m
         ci, ck = math.floor(x / size), math.floor(z / size)
         for key in [k for k in self.loaded
                     if max(abs(k[0] - ci), abs(k[1] - ck)) > self.radius + 1]:
             self.loaded.pop(key).removeNode()
+            self._roadless.discard(key)
             self._batch[2] += 1
         b = self._batch
-        if built < budget and (b[0] or b[2]):   # nothing left to build: one line per batch
+        if not left and (b[0] or b[2]):   # nothing left to build: one line per batch
             log.info("chunks: +%d in %.0f ms (%.1f ms each), -%d, %d loaded",
                      b[0], b[1], b[1] / max(b[0], 1), b[2], len(self.loaded))
             self._batch = [0, 0.0, 0]
         return built
+
+    def _add_roads(self, key):
+        roads = self.terrain.road_mesh(*key)
+        if roads is None:
+            return
+        name = f"chunk_{key[0]}_{key[1]}_roads"
+        road_node = self.loaded[key].attachNewNode(mesh_node(roads, name))
+        if self.road_texture is not None:
+            # roads tile their own finer, higher-contrast noise
+            road_node.setTexture(self.road_texture, 1)
+        # just above the flattened ground, and drawn over it where the depth
+        # buffer can't tell them apart
+        road_node.setDepthOffset(1)

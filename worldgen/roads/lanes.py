@@ -1,4 +1,4 @@
-"""Lane paths over the road network, for traffic (world.traffic).
+"""Lane paths over the road network, for traffic (worldgen.traffic).
 
 Every Road carries two lanes, one each way, driven on the right: the road's
 centre line pushed LANE_SHARE x the half width to the right (mitred through
@@ -89,7 +89,7 @@ def connector(a, b):
 
 
 class LaneMap:
-    """Lanes of a world.roads.RoadNetwork, made on demand and cached."""
+    """Lanes of a worldgen.roads.RoadNetwork, made on demand and cached."""
 
     def __init__(self, network):
         self.net = network
