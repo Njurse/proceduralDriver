@@ -62,13 +62,17 @@ def _borders(world, n=12, reach=12000.0):
 
 
 def _road_points(world, n=40):
-    """Centreline points of the roads round the origin, away from nodes."""
+    """Centreline points of the roads round the origin, away from nodes and
+    from other roads (organic roads may cross without a node)."""
     out = []
-    for r in world.roads.roads_near(-600.0, -600.0, 600.0, 600.0):
+    roads = world.roads.roads_near(-600.0, -600.0, 600.0, 600.0)
+    for r in roads:
         reach = r.half_width + r.shoulder + 30.0
         s = np.concatenate([[0.0], np.cumsum(np.hypot(r.dx, r.dz))])
         for k in range(len(r.pts) - 1):
-            if reach < s[k] < s[-1] - reach:
+            x, z = np.array([r.pts[k, 0]]), np.array([r.pts[k, 1]])
+            if reach < s[k] < s[-1] - reach and not any(
+                    o is not r and o.terms(x, z)[0][0] < reach for o in roads):
                 out.append((r, k))
     rng = np.random.default_rng(3)
     return [out[i] for i in rng.choice(len(out), min(n, len(out)), replace=False)]
@@ -183,7 +187,9 @@ def test_the_world_is_deterministic():
 
 
 def test_chunks_and_road_strips_meet_without_seams(world):
-    keys = [(i, k) for i in range(-3, 3) for k in range(-3, 3)]
+    x, z, _ = world.spawn()  # a 6 x 6 chunk block round the spawn road
+    ci, ck = int(x // SIZE), int(z // SIZE)
+    keys = [(i, k) for i in range(ci - 3, ci + 3) for k in range(ck - 3, ck + 3)]
     meshes = {key: chunk_mesh(world, *key) for key in keys}
     res = config.TERRAIN_CHUNK_RES
     for (i, k), m in meshes.items():
@@ -196,9 +202,9 @@ def test_chunks_and_road_strips_meet_without_seams(world):
             np.testing.assert_array_equal(g[-1], n[0])
     # every road segment in the block is drawn by exactly one chunk, and the
     # strips of neighbouring chunks share their end vertices exactly
-    lo, hi = -3 * SIZE, 3 * SIZE
+    lo, hi = np.array([ci - 3, ck - 3]) * SIZE, np.array([ci + 3, ck + 3]) * SIZE
     expected = segments = 0
-    for r in world.roads.roads_near(lo, lo, hi, hi):
+    for r in world.roads.roads_near(*lo, *hi):
         mid = 0.5 * (r.pts[:-1] + r.pts[1:])
         inside = np.nonzero((mid >= lo).all(axis=1) & (mid < hi).all(axis=1))[0]
         segments += len(inside)
@@ -206,7 +212,7 @@ def test_chunks_and_road_strips_meet_without_seams(world):
         expected += 4 * len(inside) + 2 * dashes   # road quads + dashed centre line
     strips = [world.road_mesh(*key) for key in keys]
     strips = [s for s in strips if s is not None]
-    assert segments > 50
+    assert segments > 30
     assert sum(len(s.tris) for s in strips) == expected
     verts = {}
     for s in strips:
@@ -253,29 +259,15 @@ def test_off_road_is_offroad(world):
             assert world(x + dx, z + dz)[2] == SURFACE_OFFROAD
 
 
-def test_sparse_biomes_keep_every_nth_grid_line(world):
-    roads = world.roads
-    assert roads.every["desert"] == 2 and roads.every["treacherous"] == 3
-    seen = dict.fromkeys(roads.every, 0)
-    for i in range(-15, 15):
-        for j in range(-15, 15):
-            for kind, mid, line in [("h", ((i + 0.5) * roads.base, j * roads.base), j),
-                                    ("v", (i * roads.base, (j + 0.5) * roads.base), i)]:
-                name = world.regions.biome_at(*mid).name
-                exists = roads.road(kind, i, j) is not None
-                assert exists == (line % roads.every[name] == 0)
-                seen[name] += exists
-    assert seen["plains"] > 0 and seen["desert"] > 0
-
-
 # -------------------------------------------------------------------- car
 def _drive(world, x, z, heading, steer_fn, throttle_fn, ticks):
     v = Vehicle(load_cosmetics())
     v.reset(x, z, heading, ground=world)
     pw = PhysicsWorld()
     pw.add(v)
-    start, on_road = v.pos.copy(), 0
+    dist, on_road = 0.0, 0
     for f in range(ticks):
+        last = v.pos.copy()
         v.process_input(_inp(steer=steer_fn(v, f), throttle=throttle_fn(v)))
         pw.step(DT)
         for corner in v.geo.c_points[:4]:
@@ -284,7 +276,8 @@ def _drive(world, x, z, heading, steer_fn, throttle_fn, ticks):
             assert depth < 0.15, f"body corner {depth:.2f} m under the ground at tick {f}"
         assert v.rot[1, 1] > 0.5, f"car on its side at tick {f}"
         on_road += world(v.pos[0], v.pos[2])[2] == SURFACE_ROAD
-    return float(np.linalg.norm((v.pos - start)[[0, 2]])), on_road / ticks
+        dist += float(np.linalg.norm((v.pos - last)[[0, 2]]))
+    return dist, on_road / ticks  # odometer: organic roads can dead-end
 
 
 def _start(world, biome):

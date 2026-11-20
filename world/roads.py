@@ -1,5 +1,11 @@
 """Organic road network: a grown spanning tree, streamed with the terrain.
 
+The world is infinite, so the growth below runs per SUPER_M square
+*super-cell*, each from its own hashed seed and confined to its square.
+Neighbouring super-cells are stitched by linking mutually-nearest border
+nodes across their shared edge.  A cell's graph depends only on (seed, cell)
+and a stitch only on its two cells, so any query order sees the same roads.
+
 Roads grow from seed nodes using a priority-queue expansion that minimises a
 cost combining distance, terrain slope, and a jittered direction field.  The
 result is a sparse spanning tree whose branches follow valleys and contours,
@@ -24,8 +30,8 @@ Growth rules
 of the engine needs no edits.
 """
 
-import math
 import heapq
+import math
 
 import numpy as np
 
@@ -34,23 +40,24 @@ MARKING_HALF_WIDTH = 0.12  # dashed centre line half-width (m)
 MARKING_LIFT      = 0.02   # centre-line lift above road strip
 SMOOTH_WINDOW_M   = 48.0   # moving-average window for height profile
 SMOOTH_PASSES     = 3
-REACH_FRACTION    = 0.45   # safety check: roads may stray this fraction of
-                           # min_spacing from their seed before we warn
+SUPER_M           = 4096.0  # side of a growth super-cell
 
 # Growth tuning
 _STEP_M           = 60.0   # advance per growth step
 _MIN_SPACING_M    = 120.0  # minimum distance between any two nodes
 _MERGE_RADIUS_M   = 55.0   # snap to existing node instead of creating new one
 _CROSS_LINK_MAX_D = 180.0  # max straight-line dist for a cross-link edge
-_CROSS_LINK_RATIO = 4.0    # add cross-link when tree-dist > ratio * straight
 _MAX_GRADE        = 0.12   # hard cap on allowable slope for growth cost
 _TURN_NOISE_SCALE = 0.00018  # spatial frequency of direction-drift noise
 _TURN_NOISE_AMP   = 0.55   # amplitude in radians
 _BRANCH_PROB      = 0.18   # probability a grown node also spawns a side branch
-_SEED_COUNT       = 48     # seeds per world (actual count is seed-dependent)
+_SEED_COUNT       = 48     # seeds per super-cell
+_STITCH_M         = 600.0  # longest link between neighbouring super-cells
+_TILE_M           = 256.0  # spatial index tile
+_MARGIN_M         = 700.0  # roads stray at most this far out of their super-cell
 
 _MASK        = (1 << 64) - 1
-_CACHE_LIMIT = 20_000
+_CACHE_LIMIT = 32         # super-cells kept (and 1000x as many roads)
 
 
 # ------------------------------------------------------------------ hashing
@@ -181,15 +188,15 @@ class _NodeStore:
                 self._cells.setdefault((ci + di, cj + dj), []).append(idx)
         return idx
 
-    def nearest_within(self, x, z, radius):
-        """Index of the closest node within ``radius``, or -1."""
+    def nearest_within(self, x, z, radius, exclude=-1):
+        """Index of the closest node within ``radius`` (not ``exclude``), or -1."""
         best_d2, best_i = radius * radius, -1
         ci, cj = self._cell(x, z)
         seen = set()
         for di in (-1, 0, 1):
             for dj in (-1, 0, 1):
                 for idx in self._cells.get((ci + di, cj + dj), ()):
-                    if idx in seen:
+                    if idx in seen or idx == exclude:
                         continue
                     seen.add(idx)
                     nx, nz, _ = self._nodes[idx]
@@ -221,14 +228,11 @@ class _NodeStore:
         return len(self._nodes)
 
 
-def _grow_network(regions, seed, world_extent_m=4096):
-    """Return (node_store, edge_list) for the grown road graph.
-
-    ``world_extent_m`` is the half-extent of the region to populate; seeds
-    and growth are confined to [-ext, ext] x [-ext, ext].  Pass a larger
-    value for open worlds; it only affects seed placement."""
-    rng_seed = seed
-    ext  = world_extent_m
+def _grow_network(regions, seed, ci, cj):
+    """(node_store, edge_list) of the road graph grown in super-cell (ci, cj):
+    seeds and growth stay inside [ci, ci + 1) x [cj, cj + 1) * SUPER_M."""
+    rng_seed = int(hash01(seed, 9, ci, cj) * (1 << 53))
+    x0, z0 = ci * SUPER_M, cj * SUPER_M
     step = _STEP_M
 
     # 1. Poisson-disk seeds ------------------------------------------------
@@ -238,8 +242,8 @@ def _grow_network(regions, seed, world_extent_m=4096):
     max_attempts = _SEED_COUNT * 60
     while seeds_placed < _SEED_COUNT and attempts < max_attempts:
         attempts += 1
-        sx = (hash01(rng_seed, 10, attempts) * 2 - 1) * ext
-        sz = (hash01(rng_seed, 11, attempts) * 2 - 1) * ext
+        sx = x0 + hash01(rng_seed, 10, attempts) * SUPER_M
+        sz = z0 + hash01(rng_seed, 11, attempts) * SUPER_M
         if ns.nearest_within(sx, sz, _MIN_SPACING_M) >= 0:
             continue
         h = float(regions.height(sx, sz))
@@ -250,7 +254,7 @@ def _grow_network(regions, seed, world_extent_m=4096):
     # heap: (cost, node_idx, dir_angle, branch_depth)
     heap   = []
     edges  = []           # [(i, j)]  node index pairs
-    in_tree = set(range(len(ns)))
+    edge_set = set()
 
     def push_frontier(node_i, angle, depth):
         # jitter the angle with the direction-noise field
@@ -287,6 +291,8 @@ def _grow_network(regions, seed, world_extent_m=4096):
 
         nx = sx + step * math.cos(angle)
         nz = sz + step * math.sin(angle)
+        if not (x0 <= nx < x0 + SUPER_M and z0 <= nz < z0 + SUPER_M):
+            continue   # the neighbour super-cell grows its own roads
         nh = float(regions.height(nx, nz))
 
         # Grade check
@@ -297,7 +303,8 @@ def _grow_network(regions, seed, world_extent_m=4096):
             nx2  = sx + step * math.cos(perp)
             nz2  = sz + step * math.sin(perp)
             nh2  = float(regions.height(nx2, nz2))
-            if abs(nh2 - sh) / step < grade:
+            inside = x0 <= nx2 < x0 + SUPER_M and z0 <= nz2 < z0 + SUPER_M
+            if inside and abs(nh2 - sh) / step < grade:
                 nx, nz, nh, angle = nx2, nz2, nh2, perp
             else:
                 continue   # give up this branch; too steep either way
@@ -306,18 +313,20 @@ def _grow_network(regions, seed, world_extent_m=4096):
         existing = ns.nearest_within(nx, nz, _MERGE_RADIUS_M)
         if existing >= 0 and existing != src_i:
             dst_i = existing
-            if (src_i, dst_i) not in {(a, b) for a, b in edges}:
+            if (min(src_i, dst_i), max(src_i, dst_i)) not in edge_set:
+                edge_set.add((min(src_i, dst_i), max(src_i, dst_i)))
                 edges.append((src_i, dst_i))
             # Don't push frontier from a fully explored node
             continue
         elif existing == src_i:
             continue
         else:
-            # Reject if too close to *any* existing node (not just merge radius)
-            if ns.nearest_within(nx, nz, _MIN_SPACING_M * 0.6) >= 0:
+            # Reject if too close to any other node (not just merge radius)
+            if ns.nearest_within(nx, nz, _MIN_SPACING_M * 0.6, exclude=src_i) >= 0:
                 continue
             dst_i = ns.add(nx, nz, nh)
 
+        edge_set.add((src_i, dst_i))
         edges.append((src_i, dst_i))
         step_count += 1
 
@@ -330,7 +339,6 @@ def _grow_network(regions, seed, world_extent_m=4096):
             push_frontier(dst_i, branch_angle, depth + 1)
 
     # 3. Cross-links for loops ---------------------------------------------
-    edge_set = {(min(a, b), max(a, b)) for a, b in edges}
     # Build a simple tree-distance approximation via BFS from every node
     # (only needed for small graphs; for large ones we just use Euclidean)
     for i in range(len(ns)):
@@ -363,28 +371,88 @@ class RoadNetwork:
     def __init__(self, regions, seed=None):
         self.regions = regions
         self.seed    = regions.seed if seed is None else int(seed)
-        # Pick a representative biome for road style; use the first biome's rules
-        # (the grown network doesn't respect per-biome density the same way the
-        # old grid did; instead it respects grade and blends at biome borders)
-        self._biome_default = regions.biomes[0]
-        self._nodes, self._edge_list = _grow_network(regions, self.seed)
-        self._roads = {}   # (i, j) -> Road | None
-        self._cells = {}   # spatial cache
+        self._graphs = {}   # (ci, cj) -> (node_store, edges)
+        self._cells  = {}   # (ci, cj) -> {tile: [(key, a, b, bbox)]}
+        self._roads  = {}   # key -> Road | None, built on first use
+        # how far a road strays from the box round its two nodes
+        self._reach  = max(0.5 * b.roads.curviness_m + 0.5 * b.roads.width_m
+                           + b.roads.shoulder_m for b in regions.biomes)
 
-    # ---------------------------------------------------------------- queries
+    # ---------------------------------------------------------------- graph
 
-    def _road_for_edge(self, i, j):
-        key = (min(i, j), max(i, j))
-        if key in self._roads:
-            return self._roads[key]
-        a = self._nodes[i]
-        b = self._nodes[j]
-        mid_x = 0.5 * (a[0] + b[0])
-        mid_z = 0.5 * (a[1] + b[1])
-        biome  = self.regions.biome_at(mid_x, mid_z)
-        road   = self._build(key, a, b, biome)
-        self._roads[key] = road
-        return road
+    def _graph(self, ci, cj):
+        key = (ci, cj)
+        if key not in self._graphs:
+            if len(self._graphs) > 2 * _CACHE_LIMIT:
+                self._graphs.clear()
+            self._graphs[key] = _grow_network(self.regions, self.seed, ci, cj)
+        return self._graphs[key]
+
+    def _node(self, ref):
+        return self._graph(*ref[0])[0][ref[1]]
+
+    def _stitch(self, a, b):
+        """Edges ((cell, i), (cell, j)) joining mutually-nearest nodes within
+        _STITCH_M of the border between super-cell a and its +x or +z
+        neighbour b."""
+        axis = 0 if b[0] != a[0] else 1
+        line = b[axis] * SUPER_M
+        sides = []
+        for cell in (a, b):
+            ns = self._graph(*cell)[0]
+            sides.append([(cell, i) for i in range(len(ns))
+                          if abs(ns[i][axis] - line) < _STITCH_M])
+        node = self._node
+
+        def closest(ref, others):
+            p = node(ref)
+            return min(others, key=lambda o: math.hypot(p[0] - node(o)[0], p[1] - node(o)[1]),
+                       default=None)
+
+        out = []
+        for ra in sides[0]:
+            rb = closest(ra, sides[1])
+            if rb is None or closest(rb, sides[0]) != ra:
+                continue
+            p, q = node(ra), node(rb)
+            straight = math.hypot(p[0] - q[0], p[1] - q[1])
+            if straight <= _STITCH_M and abs(p[2] - q[2]) / straight <= _MAX_GRADE * 1.5:
+                out.append((ra, rb))
+        return out
+
+    def _cell(self, ci, cj):
+        """{tile: [(key, a, b, bbox)]} for the edges of super-cell (ci, cj) and
+        its stitches to the +x and +z neighbours (roads are built lazily)."""
+        key = (ci, cj)
+        if key in self._cells:
+            return self._cells[key]
+        if len(self._cells) > _CACHE_LIMIT:
+            self._cells.clear()
+        ns, edges = self._graph(ci, cj)
+        pairs = [((key, i), (key, j)) for i, j in edges]
+        pairs += self._stitch(key, (ci + 1, cj)) + self._stitch(key, (ci, cj + 1))
+        tiles = {}
+        for ra, rb in pairs:
+            ra, rb = min(ra, rb), max(ra, rb)
+            a, b = self._node(ra), self._node(rb)
+            r = self._reach
+            box = (min(a[0], b[0]) - r, min(a[1], b[1]) - r, max(a[0], b[0]) + r,
+                   max(a[1], b[1]) + r)
+            ref = ((*ra[0], ra[1], *rb[0], rb[1]), ra, rb, box)
+            for ti in range(math.floor(box[0] / _TILE_M), math.floor(box[2] / _TILE_M) + 1):
+                for tj in range(math.floor(box[1] / _TILE_M), math.floor(box[3] / _TILE_M) + 1):
+                    tiles.setdefault((ti, tj), []).append(ref)
+        self._cells[key] = tiles
+        return tiles
+
+    def _road(self, key, ra, rb):
+        if key not in self._roads:
+            if len(self._roads) > 1000 * _CACHE_LIMIT:
+                self._roads.clear()
+            a, b = self._node(ra), self._node(rb)
+            biome = self.regions.biome_at(0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]))
+            self._roads[key] = self._build(key, a, b, biome)
+        return self._roads[key]
 
     def _build(self, key, a, b, biome):
         p0, p2 = np.array(a[:2]), np.array(b[:2])
@@ -393,7 +461,7 @@ class RoadNetwork:
         if length < 1e-3:
             return None
         perp = np.array([-chord[1], chord[0]]) / length
-        bow  = (2.0 * hash01(self.seed, 3, key[0], key[1]) - 1.0) * min(
+        bow  = (2.0 * hash01(self.seed, 3, *key) - 1.0) * min(
             biome.roads.curviness_m, length * 0.3)
         p1   = 0.5 * (p0 + p2) + perp * bow
         n    = max(4, math.ceil(1.05 * length / SEGMENT_M))
@@ -409,21 +477,25 @@ class RoadNetwork:
 
     # ---------------------------------------------------------------- spatial
 
-    def _all_roads(self):
-        """Iterator over all Road objects, building them on first access."""
-        for i, j in self._edge_list:
-            r = self._road_for_edge(i, j)
-            if r is not None:
-                yield r
-
     def roads_near(self, x0, z0, x1, z1):
-        """Roads whose reach overlaps the axis-aligned box, deduped."""
-        # We use a simple per-call scan; for large worlds swap to a cell index.
+        """Roads whose reach overlaps the axis-aligned box, each once, in a
+        fixed order."""
         seen = {}
-        for r in self._all_roads():
-            if r.key not in seen and r.overlaps(x0, z0, x1, z1):
-                seen[r.key] = r
-        return list(seen.values())
+        for ci in range(math.floor((x0 - _MARGIN_M) / SUPER_M),
+                        math.floor((x1 + _MARGIN_M) / SUPER_M) + 1):
+            for cj in range(math.floor((z0 - _MARGIN_M) / SUPER_M),
+                            math.floor((z1 + _MARGIN_M) / SUPER_M) + 1):
+                tiles = self._cell(ci, cj)
+                for ti in range(math.floor(x0 / _TILE_M), math.floor(x1 / _TILE_M) + 1):
+                    for tj in range(math.floor(z0 / _TILE_M), math.floor(z1 / _TILE_M) + 1):
+                        for key, ra, rb, b in tiles.get((ti, tj), ()):
+                            if (key in seen or b[0] > x1 or x0 > b[2] or b[1] > z1
+                                    or z0 > b[3]):
+                                continue
+                            r = self._road(key, ra, rb)
+                            if r is not None and r.overlaps(x0, z0, x1, z1):
+                                seen[key] = r
+        return [seen[k] for k in sorted(seen)]
 
     # ---------------------------------------------------------------- ground
 
@@ -467,25 +539,24 @@ class RoadNetwork:
 
     def nearest(self, x, z):
         """(distance, closest point (x, z), unit tangent (x, z), road) for
-        the road nearest (x, z)."""
-        best = None
+        the road nearest (x, z), searching ever wider boxes round it."""
         xa, za = np.array([float(x)]), np.array([float(z)])
-        # Search within a generous radius; fall back to full scan if needed
-        radius = max(r.half_width + r.shoulder for r in self._all_roads()
-                     ) if self._edge_list else 100.0
-        candidates = self.roads_near(x - radius * 4, z - radius * 4,
-                                     x + radius * 4, z + radius * 4)
-        if not candidates:
-            candidates = list(self._all_roads())
-        for r in candidates:
-            d, _, _, _, ddx, ddz, k = r.terms(xa, za)
-            if best is None or d[0] < best[0]:
-                k   = int(k[0])
-                tan = np.array([r.dx[k], r.dz[k]]) * math.sqrt(r.inv_len2[k])
-                best = (float(d[0]),
-                        np.array([x, z]) - d[0] * np.array([ddx[0], ddz[0]]),
-                        tan, r)
-        return best
+        r = _TILE_M
+        while True:
+            best = None
+            for road in self.roads_near(x - r, z - r, x + r, z + r):
+                d, _, _, _, ddx, ddz, k = road.terms(xa, za)
+                if best is None or d[0] < best[0]:
+                    k = int(k[0])
+                    tan = np.array([road.dx[k], road.dz[k]]) * math.sqrt(road.inv_len2[k])
+                    best = (float(d[0]),
+                            np.array([x, z]) - d[0] * np.array([ddx[0], ddz[0]]),
+                            tan, road)
+            if best is not None and best[0] <= r:
+                return best
+            if r > 2 * SUPER_M:
+                raise ValueError(f"no road within {r:.0f} m of ({x:.0f}, {z:.0f})")
+            r *= 2.0
 
     # ---------------------------------------------------------------- meshes
 
