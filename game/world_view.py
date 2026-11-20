@@ -27,6 +27,7 @@ from panda3d.core import (
 import config
 from core.noise import fbm_2d
 from core.textures import _to_texture
+from game.structure_view import style_structures
 from worldgen.chunk import chunk_mesh, chunks_around
 
 log = logging.getLogger(__name__)
@@ -129,6 +130,7 @@ class ChunkStreamer:
         self.build_ms = float(config.TERRAIN_BUILD_MS if build_ms is None else build_ms)
         self.loaded = {}
         self._roadless = set()      # loaded, road strips still to add (a step of their own)
+        self._bare = set()          # loaded, structures still to add (another step)
         self._batch = [0, 0.0, 0]   # built, ms, dropped since the last summary
 
     def reset(self, terrain):
@@ -137,14 +139,15 @@ class ChunkStreamer:
             node.removeNode()
         self.loaded.clear()
         self._roadless.clear()
+        self._bare.clear()
         self.terrain = terrain
         self.spec = terrain.spec
 
     def update(self, x, z, budget=None):
         """Build up to ``budget`` (default TERRAIN_BUILDS_PER_FRAME) missing
         chunks, nearest first, and drop chunks more than radius + 1 away.
-        Per frame (no ``budget``) a chunk's ground and its road strips are
-        separate steps, and building stops once ``build_ms`` is spent, so
+        Per frame (no ``budget``) a chunk's ground, its road strips and its
+        structures are separate steps, and building stops once ``build_ms`` is spent, so
         streaming costs about one step a frame.  Returns the steps taken."""
         per_frame = budget is None
         stop = time.perf_counter() + self.build_ms / 1000.0 if per_frame else math.inf
@@ -153,10 +156,11 @@ class ChunkStreamer:
         if roads is not None:
             roads.prefetch(x, z, (self.radius + 1) * self.spec.chunk_size_m)
         has_roads = hasattr(self.terrain, "road_mesh")
+        has_structures = hasattr(self.terrain, "structure_mesh")
         built, left = 0, False
         for key in chunks_around(x, z, self.radius, self.spec.chunk_size_m):
             fresh = key not in self.loaded
-            if not fresh and key not in self._roadless:
+            if not fresh and key not in self._roadless and key not in self._bare:
                 continue
             if built >= budget or time.perf_counter() >= stop:
                 left = True
@@ -169,9 +173,16 @@ class ChunkStreamer:
                 self._batch[0] += 1
                 if has_roads:
                     self._roadless.add(key)
-            if key in self._roadless and not (fresh and per_frame):
+                if has_structures:
+                    self._bare.add(key)
+            more = not (fresh and per_frame)   # per frame: one step a chunk a frame
+            if more and key in self._roadless:
                 self._roadless.discard(key)
                 self._add_roads(key)
+                more = not per_frame
+            if more and key in self._bare:
+                self._bare.discard(key)
+                self._add_structures(key)
             built += 1
             self._batch[1] += (time.perf_counter() - t0) * 1000.0
         size = self.spec.chunk_size_m
@@ -180,6 +191,7 @@ class ChunkStreamer:
                     if max(abs(k[0] - ci), abs(k[1] - ck)) > self.radius + 1]:
             self.loaded.pop(key).removeNode()
             self._roadless.discard(key)
+            self._bare.discard(key)
             self._batch[2] += 1
         b = self._batch
         if not left and (b[0] or b[2]):   # nothing left to build: one line per batch
@@ -187,6 +199,12 @@ class ChunkStreamer:
                      b[0], b[1], b[1] / max(b[0], 1), b[2], len(self.loaded))
             self._batch = [0, 0.0, 0]
         return built
+
+    def _add_structures(self, key):
+        mesh = self.terrain.structure_mesh(*key)
+        if mesh is not None:
+            name = f"chunk_{key[0]}_{key[1]}_structures"
+            style_structures(self.loaded[key].attachNewNode(mesh_node(mesh, name)))
 
     def _add_roads(self, key):
         roads = self.terrain.road_mesh(*key)
