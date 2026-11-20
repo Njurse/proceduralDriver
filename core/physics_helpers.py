@@ -19,25 +19,12 @@ Units (C value -> here):
 import math
 from dataclasses import dataclass
 
-ONE = 4096.0
-C_FRAME_HZ = 30.0
-# World scale the renderer already uses (config.HAVANA_SHIP_SCALE = 0.01 m/unit).
-C_UNITS_PER_METRE = 100.0
+from core.units import C_FRAME_HZ, ONE
+from core.units import dr2_angle as c_angle
+from core.units import dr2_velocity as c_wheel_speed
+from core.units import to_dr2_velocity as to_c_wheel_speed
 
-
-def c_angle(units: float) -> float:
-    """C angle units (4096 per turn) to radians."""
-    return units * math.tau / ONE
-
-
-def c_wheel_speed(ws: float) -> float:
-    """C ``hd.wheel_speed`` to m/s (wheelforces.c AddWheelForcesDriver1 end)."""
-    return ws / ONE * C_FRAME_HZ / C_UNITS_PER_METRE
-
-
-def to_c_wheel_speed(mps: float) -> float:
-    """m/s to C ``hd.wheel_speed`` units (inverse of c_wheel_speed)."""
-    return mps * C_UNITS_PER_METRE / C_FRAME_HZ * ONE
+__all__ = ["C_FRAME_HZ", "c_angle", "c_wheel_speed", "to_c_wheel_speed"]
 
 
 # Game/C/pad.h ECarPads (MPAD_* bit values).

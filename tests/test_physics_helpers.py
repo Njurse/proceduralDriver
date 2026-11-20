@@ -239,4 +239,5 @@ def test_handling_ratio_and_traction_scale_both_axles():
 
 def test_unit_conversions():
     assert c_angle(1024) == pytest.approx(math.pi / 2)
-    assert c_wheel_speed(4096) == pytest.approx(0.3)
+    # 4096ths of a DR2 unit per 30 Hz frame, 150 DR2 units per metre
+    assert c_wheel_speed(4096) == pytest.approx(30 / 150)
