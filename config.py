@@ -271,7 +271,7 @@ DRIVE_BOUNDARY_MARGIN = 12.0    # keep the car this far inside the ground quad
 CHASE_CAM_DIST = 7.5            # metres behind the car (was 10)
 CHASE_CAM_HEIGHT = 2.0          # was 3.6
 CHASE_CAM_LOOK_AHEAD = 6.0      # was 0: aimed at the car itself
-CHASE_CAM_LOOK_HEIGHT = 0.0     # was 0.8
+CHASE_CAM_LOOK_HEIGHT = -0.7    # below body origin: ~11 deg down, keeps the car in frame
 CHASE_CAM_FOV = 60.0            # horizontal degrees (Panda default 40)
 
 # Wheels -------------------------------------------------------------------
