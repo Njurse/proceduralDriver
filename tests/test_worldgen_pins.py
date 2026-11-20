@@ -33,7 +33,7 @@ PINS = {
         "region_heights": "59f7adc18b4f5f0a",
         "world_heights": "a1c5b90bf952f2a7",
         "chunk_meshes": "92b1785098af5fa0",
-        "road_meshes": "cc14fc4d68e8cf56",
+        "road_meshes": "0dc3c2c68367703d",
         "road_graph": "655af21de532fb74",
         "roads_near": "60e5e86e452a15d1",
         "lanes": "599e1b84efe222ff",

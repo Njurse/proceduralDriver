@@ -1,7 +1,8 @@
 """Road strips for a chunk: a quad per segment, a round fan on the outside
 of each bend (the flattened ground is round there too, so a sharp corner
-neither narrows nor lets the shoulder poke through), plus dashed centre
-markings, as numpy arrays (game/world_view.py turns them into Panda3D geometry)."""
+neither narrows nor lets the shoulder poke through), a round cap over each
+junction (the wedges between square strip ends would show the ground), plus
+dashed centre markings, as numpy arrays (game/world_view.py turns them into Panda3D geometry)."""
 
 import math
 
@@ -9,6 +10,8 @@ import numpy as np
 
 MARKING_HALF_WIDTH = 0.12  # dashed centre line half-width (m)
 MARKING_LIFT = 0.02        # centre-line lift above the road strip
+CAP_SIDES = 16             # a junction cap's polygon
+CAP_DROP = 0.01            # caps sit this far under the strips (no z-fight where they overlap)
 
 
 def strips(roads, ground, x0, z0, x1, z1, lift):
@@ -56,6 +59,7 @@ def strips(roads, ground, x0, z0, x1, z1, lift):
                 tris.append(base + 6 + np.array([[0, 1, 2], [1, 3, 2]]))
             if k + 1 < len(seg):
                 _bend(r, k, side, s, pos, col, uv, tris, lifts)
+    _caps(roads, x0, z0, x1, z1, pos, col, uv, tris, lifts)
     if not pos:
         return None
     xz  = np.concatenate(pos)
@@ -94,3 +98,35 @@ def _bend(r, k, side, s, pos, col, uv, tris, lifts):
                         np.full(n + 2, s[k + 1])], axis=1))
     tris.append(base + np.stack([np.zeros(n, int), np.arange(1, n + 1), np.arange(2, n + 2)],
                                 axis=1))
+
+
+def _caps(roads, x0, z0, x1, z1, pos, col, uv, tris, lifts):
+    """A disc over every junction in the box where two or more road ends meet,
+    as wide as the widest of them (circumscribed, so the strips' end corners
+    are inside) and coloured like it: the flattened ground is the road there."""
+    nodes = {}
+    for r in roads:
+        for p in (r.pts[0], r.pts[-1]):
+            if not (x0 <= p[0] < x1 and z0 <= p[1] < z1):
+                continue
+            key = (round(float(p[0]) * 8.0), round(float(p[1]) * 8.0))
+            n, best = nodes.get(key, (0, None))
+            if best is None or r.half_width > best[1].half_width:
+                best = (p, r)
+            nodes[key] = (n + 1, best)
+    ang = np.arange(CAP_SIDES) * (2.0 * math.pi / CAP_SIDES)
+    ring = np.stack([np.cos(ang), np.sin(ang)], axis=1) / math.cos(math.pi / CAP_SIDES)
+    for n, (c, r) in nodes.values():
+        if n < 2:
+            continue
+        base = sum(len(p) for p in pos)
+        rim = c + ring * r.half_width
+        pos.append(np.concatenate([c[None, :], rim]))
+        lifts.extend([-CAP_DROP] * (CAP_SIDES + 1))
+        col.append(np.concatenate([np.tile(r.color, (CAP_SIDES + 1, 1)),
+                                   np.ones((CAP_SIDES + 1, 1))], axis=1))
+        uv.append(np.concatenate([[[r.half_width, 0.0]],
+                                  (ring + 1.0) * r.half_width], axis=0))
+        k = np.arange(CAP_SIDES)
+        tris.append(base + np.stack([np.zeros(CAP_SIDES, int), 1 + k,
+                                     1 + (k + 1) % CAP_SIDES], axis=1))

@@ -26,6 +26,7 @@ from worldgen.ground import (  # noqa: E402
 )
 from worldgen.palette import terrain_colors  # noqa: E402
 from worldgen.roads import MARKING_LIFT, layout  # noqa: E402
+from worldgen.roads.mesh import CAP_DROP, CAP_SIDES  # noqa: E402
 
 DT = 1.0 / 60.0
 SPEC = world_spec(biomes=())
@@ -215,12 +216,18 @@ def test_chunks_and_road_strips_meet_without_seams(world):
     # strips of neighbouring chunks share their end vertices exactly
     lo, hi = np.array([ci - 3, ck - 3]) * SIZE, np.array([ci + 3, ck + 3]) * SIZE
     expected = segments = 0
+    ends = {}
     for r in world.roads.roads_near(*lo, *hi):
         mid = 0.5 * (r.pts[:-1] + r.pts[1:])
         inside = np.nonzero((mid >= lo).all(axis=1) & (mid < hi).all(axis=1))[0]
         segments += len(inside)
         dashes = np.count_nonzero(inside % 2 == 0) if r.markings is not None else 0
         expected += 4 * len(inside) + 2 * dashes   # road quads + dashed centre line
+        for p in (r.pts[0], r.pts[-1]):
+            if (p >= lo).all() and (p < hi).all():
+                key = (round(p[0] * 8), round(p[1] * 8))
+                ends[key] = ends.get(key, 0) + 1
+    expected += CAP_SIDES * sum(n >= 2 for n in ends.values())   # a cap per junction
     strips = [world.road_mesh(*key) for key in keys]
     strips = [s for s in strips if s is not None]
     assert segments > 30
@@ -229,7 +236,9 @@ def test_chunks_and_road_strips_meet_without_seams(world):
     for s in strips:
         for p in s.pos:
             verts.setdefault((p[0], p[2]), set()).add(p[1])
-    assert all(len(h) == 1 for h in verts.values())
+    # strips share their vertices exactly; a junction cap's centre sits CAP_DROP under
+    assert all(len(h) == 1 or (len(h) == 2 and max(h) - min(h) == pytest.approx(CAP_DROP))
+               for h in verts.values())
 
 
 def test_road_strips_sit_on_the_flattened_ground(world):
@@ -239,7 +248,8 @@ def test_road_strips_sit_on_the_flattened_ground(world):
             continue
         h = world.height(s.pos[:, 0], s.pos[:, 2])
         lift = s.pos[:, 1] - h - config.ROAD_LIFT_M
-        assert np.all((np.abs(lift) < 1e-9) | (np.abs(lift - MARKING_LIFT) < 1e-9))
+        assert np.all((np.abs(lift) < 1e-9) | (np.abs(lift - MARKING_LIFT) < 1e-9)
+                      | (np.abs(lift + CAP_DROP) < 1e-9))   # junction caps sit lower
 
 
 def test_roads_are_flat_across_and_within_grade_along(world):
