@@ -1,8 +1,8 @@
 # Procedural Driver
 
 A small driving game: a float port of the REDRIVER2 (Driver 2) car handling,
-rendered with Panda3D.  You drive the Havana car around a flat asphalt plane;
-this is the clean slate for a procedural world.
+rendered with Panda3D.  You drive the Havana car over endless, seeded rolling
+hills (Perlin fBm), streamed in 64 m chunks round the car.
 
 ## Run
 
@@ -30,13 +30,20 @@ python main.py --shots screenshots      # save camera test shots (offscreen)
 
 ```
 main.py          entry point: Panda3D scene, input, chase camera, HUD
-config.py        paths and tuning (camera, gearbox, audio)
+config.py        paths and tuning (terrain, camera, gearbox, audio)
+world/           ground.py: the Ground protocol the physics queries;
+                 terrain.py: seeded Perlin fBm height/normal; chunks.py: chunk meshes
 core/            physics (redriver2_physics, car_forces, engine, fixedpoint, quat),
                  audio (engine_sound, vehicle_audio), camera, gamepad, textures
 tests/           pytest suite, including a golden trajectory
 tools/           dr2_fixed_emu.py: integer emulator of the C handling
 assets/          Havana car model, wheels, handling.json and sounds
 ```
+
+Terrain knobs live in `config.py` (`TERRAIN_SEED`, `_SCALE`, `_OCTAVES`,
+`_AMPLITUDE`, chunk size, view radius).  A later layer (roads, a city) can
+wrap `Terrain` as a `world.ground.Ground` and override height, normal or
+surface where it builds.
 
 Deviations from the C are marked `DEVIATION` in the code; see also
 `PORTING_NOTES.md`.

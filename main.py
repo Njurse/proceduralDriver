@@ -1,4 +1,4 @@
-"""Procedural driving game: REDRIVER2 handling, Panda3D renderer.
+"""Procedural driving game: REDRIVER2 handling on endless Perlin hills, Panda3D renderer.
 
 Run:  python main.py            (windowed)
       python main.py --offscreen --frames N
@@ -28,7 +28,6 @@ from panda3d.core import (
     Fog,
     Mat4,
     NodePath,
-    TextureStage,
     TransparencyAttrib,
     Vec4,
     getModelPath,
@@ -42,13 +41,15 @@ from core.orbit_camera import OrbitCamera, orbit_offset
 from core.redriver2_physics import Input, PhysicsWorld, Vehicle
 from core.textures import _to_texture, seamless_fbm
 from core.vehicle_audio import AudioManager, sound_input
+from world.chunks import ChunkStreamer, detail_texture
+from world.terrain import Terrain
 
 log = logging.getLogger("main")
 
-WORLD_SIZE = 400.0
 # --shots: (file name, orbit angle in degrees) after a short run-up
-SHOTS = (("chase", 0.0), ("left_side", -90.0), ("right_side", 90.0),
-         ("front_looking_back", 180.0))
+SHOTS = (("world_chase", 0.0), ("world_left_side", -90.0), ("world_right_side", 90.0),
+         ("world_front_looking_back", 180.0))
+CAM_TERRAIN_CLEARANCE = 0.6  # keep the chase camera this far above the hills
 
 # Physics frame (x, y up, z forward) -> Panda3D (x, y forward, z up).  This
 # swap is a reflection; the C physics frame is itself mirrored relative to
@@ -85,6 +86,8 @@ class DriveSim(ShowBase):
 
         self.cos = load_cosmetics()
         self.vehicle = Vehicle(self.cos)
+        self.terrain = Terrain()
+        self.vehicle.reset(ground=self.terrain)
         self.physics = PhysicsWorld()
         self.physics.add(self.vehicle)
         self.input = Input()
@@ -123,26 +126,11 @@ class DriveSim(ShowBase):
             log.debug("[window] %s", exc)
 
     def _build_world(self):
-        # asphalt texture: mid grey with fbm speckle
-        size = 256
-        base = np.full((size, size), 96.0)
-        speckle = seamless_fbm(size, size, 24.0, 1337, 4) * 70.0 - 35.0
-        fine = seamless_fbm(size, size, 80.0, 4242, 3) * 26.0 - 13.0
-        grey = np.clip(base + speckle + fine, 40, 190).astype(np.uint8)
-        rgb = np.stack([grey, grey, grey + 6], axis=-1)
-        rgba = np.concatenate([rgb, np.full((size, size, 1), 255, np.uint8)],
-                              axis=-1)
-        self.ground_tex = _to_texture(rgba, "asphalt", repeat=True)
-
-        cm = CardMaker("ground")
-        cm.setFrame(-WORLD_SIZE / 2, WORLD_SIZE / 2,
-                    -WORLD_SIZE / 2, WORLD_SIZE / 2)
-        self.ground = self.render.attachNewNode(cm.generate())
-        self.ground.setP(-90)
-        self.ground.setPos(0.0, 0.0, 0.0)
-        self.ground.setTexture(self.ground_tex, 1)
-        ts = TextureStage.getDefault()
-        self.ground.setTexScale(ts, WORLD_SIZE / 6.0, WORLD_SIZE / 6.0)
+        # Endless terrain: chunk meshes streamed round the car (world/chunks.py),
+        # vertex-coloured by height and slope over a tiled detail texture.
+        self.chunks = ChunkStreamer(self.terrain, self.render, detail_texture())
+        v = self.vehicle
+        self.chunks.update(v.pos[0], v.pos[2], budget=(2 * self.chunks.radius + 1) ** 2)
 
         amb = AmbientLight("amb")
         amb.setColor(Vec4(0.55, 0.55, 0.62, 1.0))
@@ -153,11 +141,12 @@ class DriveSim(ShowBase):
         dl_node.setHpr(45, -35, 0)
         self.render.setLight(dl_node)
 
-        # Distance fog hides the edge of the ground quad.
-        fog = Fog("drive-fog")
-        fog.setColor(0.35, 0.46, 0.62)
-        fog.setExpDensity(getattr(config, "DRIVE_FOG_DENSITY", 0.005))
-        self.render.setFog(fog)
+        # Exp-squared fog: clear near the car, thick before the streaming edge.
+        self.fog = Fog("drive-fog")
+        self.fog.setMode(Fog.MExponentialSquared)
+        self.fog.setColor(0.35, 0.46, 0.62)
+        self.fog.setExpDensity(config.DRIVE_FOG_DENSITY)
+        self.render.setFog(self.fog)
 
     def _build_car(self):
         import os
@@ -369,27 +358,13 @@ class DriveSim(ShowBase):
         inp.analog = self.pad.connected and abs(self.pad.left_x) > 0.0
         v.process_input(inp)
         self.physics.step(dt)
-        self._clamp_to_world()
+        self.chunks.update(v.pos[0], v.pos[2])
 
         self._sync_car(dt)
         self._update_chase_cam(dt)
         self._update_hud()
         self._update_audio(dt)
         return task.cont
-
-    def _clamp_to_world(self):
-        """Keep the car on the ground quad, bouncing it back inward."""
-        bound = WORLD_SIZE / 2.0 - getattr(config, "DRIVE_BOUNDARY_MARGIN", 12.0)
-        v = self.vehicle
-        for pos_axis, vel_axis in ((0, 0), (2, 2)):
-            if v.pos[pos_axis] > bound:
-                v.pos[pos_axis] = bound
-                if v.vel[vel_axis] > 0.0:
-                    v.vel[vel_axis] *= -0.25
-            elif v.pos[pos_axis] < -bound:
-                v.pos[pos_axis] = -bound
-                if v.vel[vel_axis] < 0.0:
-                    v.vel[vel_axis] *= -0.25
 
     def _sync_car(self, dt):
         v = self.vehicle
@@ -423,7 +398,9 @@ class DriveSim(ShowBase):
         # car yaw frame -> physics world: right (cos h, 0, -sin h), fwd (sin h, 0, cos h)
         offset = np.array([ox * math.cos(h) + oz * math.sin(h), oy,
                            -ox * math.sin(h) + oz * math.cos(h)])
-        self.camera.setPos(*(PHYS_TO_PANDA @ (v.pos + offset)))
+        eye = v.pos + offset
+        eye[1] = max(eye[1], self.terrain.height(eye[0], eye[2]) + CAM_TERRAIN_CLEARANCE)
+        self.camera.setPos(*(PHYS_TO_PANDA @ eye))
         # aim ahead of the car in the chase view, at the car from the side/front
         ahead = config.CHASE_CAM_LOOK_AHEAD * max(0.0, math.cos(angle))
         aim = v.pos + np.array([math.sin(h) * ahead, config.CHASE_CAM_LOOK_HEIGHT,
@@ -458,8 +435,8 @@ def _save_shot(game, path):
 
 
 def take_shots(game, out_dir):
-    """Run up to speed, then save one shot per SHOTS angle and a chase shot
-    mid-corner."""
+    """Run up to speed, then save one shot per SHOTS angle, a chase shot
+    mid-corner and a wide shot over the hills and loaded chunks."""
     os.makedirs(out_dir, exist_ok=True)
 
     def run(frames):
@@ -476,7 +453,17 @@ def take_shots(game, out_dir):
     game.orbit = OrbitCamera()
     game.key_right = True
     run(40)
-    _save_shot(game, os.path.join(out_dir, "corner_chase.png"))
+    _save_shot(game, os.path.join(out_dir, "world_corner_chase.png"))
+
+    # wide: high behind the car, thin fog so the chunk edge shows
+    v = game.vehicle
+    h = v.heading
+    eye = v.pos + np.array([-math.sin(h) * 110.0, 90.0, -math.cos(h) * 110.0])
+    game.camera.setPos(*(PHYS_TO_PANDA @ eye))
+    game.camera.lookAt(*(PHYS_TO_PANDA @ (v.pos + np.array([math.sin(h), 0, math.cos(h)]) * 60.0)))
+    game.fog.setExpDensity(config.DRIVE_FOG_DENSITY * 0.15)
+    _save_shot(game, os.path.join(out_dir, "world_hills.png"))
+    game.fog.setExpDensity(config.DRIVE_FOG_DENSITY)
 
 
 def main():
