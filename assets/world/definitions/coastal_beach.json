@@ -1,0 +1,59 @@
+{
+  "name": "coastal_beach",
+  "description": "Seaside dunes: low pale sand ramps and pastel concrete promenades with white dashes.",
+  "weight": 0.7,
+  "terrain": {
+    "noise_scale_m": 180.0,
+    "amplitude_m": 6.0,
+    "octaves": 3,
+    "persistence": 0.4,
+    "lacunarity": 2.0,
+    "base_height_m": -1.5,
+    "steep_slope_deg": 9.0,
+    "noise_type": "fbm",
+    "colors": {
+      "low": [
+        0.8,
+        0.74,
+        0.58
+      ],
+      "mid": [
+        0.9,
+        0.84,
+        0.66
+      ],
+      "high": [
+        0.95,
+        0.9,
+        0.75
+      ],
+      "steep": [
+        0.76,
+        0.68,
+        0.54
+      ]
+    },
+    "detail_texture": "world/landscape/ground_texture_noise.png",
+    "detail_tile_m": 8.0
+  },
+  "roads": {
+    "grid_spacing_m": 200.0,
+    "jitter_m": 20.0,
+    "curviness_m": 30.0,
+    "width_m": 12.0,
+    "shoulder_m": 10.0,
+    "max_grade_pct": 6.0,
+    "surface": "concrete",
+    "color": [
+      0.82,
+      0.66,
+      0.7
+    ],
+    "flatten": true,
+    "markings": [
+      0.98,
+      0.98,
+      0.95
+    ]
+  }
+}

@@ -24,6 +24,8 @@ import math
 import numpy as np
 
 SEGMENT_M = 4.0           # polyline segment length
+MARKING_HALF_WIDTH = 0.12  # dashed centre line: 0.24 m wide, every other segment
+MARKING_LIFT = 0.02       # above the road strip
 SMOOTH_WINDOW_M = 48.0    # moving-average window of the height profile
 SMOOTH_PASSES = 3
 REACH_FRACTION = 0.45     # roads may stray this fraction of base from their line
@@ -65,6 +67,7 @@ class Road:
         self.shoulder = rules.shoulder_m
         self.flatten = rules.flatten
         self.color = rules.color
+        self.markings = rules.markings
         self.max_grade = rules.max_grade_pct / 100.0
         self.ax, self.az = pts[:-1, 0], pts[:-1, 1]
         self.dx, self.dz = np.diff(pts[:, 0]), np.diff(pts[:, 1])
@@ -274,7 +277,7 @@ class RoadNetwork:
         [x0, x1) x [z0, z1): (pos, normal, color, uv, tris) arrays or None.
         Vertices sit ``lift`` above ``ground`` (the flattened surface), and a
         segment shared by two chunks belongs to exactly one of them."""
-        pos, col, uv, tris = [], [], [], []
+        pos, col, uv, tris, lifts = [], [], [], [], []
         for r in self.roads_near(x0, z0, x1, z1):
             mid = 0.5 * (r.pts[:-1] + r.pts[1:])
             sel = np.nonzero((mid[:, 0] >= x0) & (mid[:, 0] < x1)
@@ -294,18 +297,29 @@ class RoadNetwork:
                         quad.append((*(r.pts[p] + f * side[p]), f, s[p]))
                 quad = np.array(quad)
                 pos.append(quad[:, :2])
+                lifts.extend([0.0] * 6)
                 shade = 1.0 - 0.12 * np.abs(quad[:, 2:3])
                 col.append(np.concatenate([np.array(r.color) * shade,
                                            np.ones((6, 1))], axis=1))
                 uv.append(np.stack([(quad[:, 2] + 1.0) * r.half_width, quad[:, 3]], axis=1))
                 tris.append(base + np.array([[0, 1, 3], [1, 4, 3], [1, 2, 4], [2, 5, 4]]))
+                if r.markings is not None and k % 2 == 0:
+                    f = MARKING_HALF_WIDTH / r.half_width
+                    dash = np.array([(*(r.pts[p] + g * f * side[p]), 0.0, s[p])
+                                     for p in (k, k + 1) for g in (-1.0, 1.0)])
+                    pos.append(dash[:, :2])
+                    lifts.extend([MARKING_LIFT] * 4)
+                    col.append(np.concatenate([np.tile(r.markings, (4, 1)), np.ones((4, 1))],
+                                              axis=1))
+                    uv.append(dash[:, [2, 3]])
+                    tris.append(base + 6 + np.array([[0, 1, 2], [1, 3, 2]]))
         if not pos:
             return None
         xz = np.concatenate(pos)
         h, hx, hz = ground.sample(xz[:, 0], xz[:, 1])
         n = np.stack([-hx, np.ones_like(h), -hz], axis=-1)
         n /= np.linalg.norm(n, axis=-1, keepdims=True)
-        p3 = np.stack([xz[:, 0], h + lift, xz[:, 1]], axis=-1)
+        p3 = np.stack([xz[:, 0], h + lift + np.array(lifts), xz[:, 1]], axis=-1)
         tris = np.concatenate(tris)
         # counter-clockwise seen from above (x, z) like the terrain, whichever
         # way the road runs

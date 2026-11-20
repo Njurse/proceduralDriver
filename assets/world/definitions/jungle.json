@@ -1,0 +1,55 @@
+{
+  "name": "jungle",
+  "description": "Deep green jungle: short, close hills and narrow winding dirt lanes that wander off the grid.",
+  "weight": 0.9,
+  "terrain": {
+    "noise_scale_m": 110.0,
+    "amplitude_m": 9.0,
+    "octaves": 4,
+    "persistence": 0.33,
+    "lacunarity": 2.0,
+    "base_height_m": 1.0,
+    "steep_slope_deg": 12.0,
+    "noise_type": "fbm",
+    "colors": {
+      "low": [
+        0.04,
+        0.18,
+        0.06
+      ],
+      "mid": [
+        0.08,
+        0.3,
+        0.1
+      ],
+      "high": [
+        0.17,
+        0.4,
+        0.14
+      ],
+      "steep": [
+        0.22,
+        0.2,
+        0.1
+      ]
+    },
+    "detail_texture": "world/landscape/ground_texture_noise.png",
+    "detail_tile_m": 8.0
+  },
+  "roads": {
+    "grid_spacing_m": 200.0,
+    "jitter_m": 35.0,
+    "curviness_m": 70.0,
+    "width_m": 8.0,
+    "shoulder_m": 8.0,
+    "max_grade_pct": 8.0,
+    "surface": "dirt",
+    "color": [
+      0.36,
+      0.26,
+      0.16
+    ],
+    "flatten": true,
+    "markings": null
+  }
+}
