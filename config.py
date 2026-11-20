@@ -29,7 +29,8 @@ TERRAIN_CHUNK_RES = 32          # quads per chunk side (2 m spacing)
 DRAW_DISTANCE_M = 290.0         # camera far plane (was ~190 m: 3 chunks of terrain)
 # chunks kept loaded in each direction round the car: enough to reach the far plane
 TERRAIN_VIEW_CHUNKS = math.ceil(DRAW_DISTANCE_M / TERRAIN_CHUNK_SIZE)
-TERRAIN_BUILDS_PER_FRAME = 2    # chunk meshes built per frame while streaming
+TERRAIN_BUILDS_PER_FRAME = 2    # chunk meshes built per frame while streaming, at most
+TERRAIN_BUILD_MS = 4.0          # and no more once this is spent (always one)
 SKYBOX_PNG = (ASSETS / "world" / "landscape" / "skybox.png").as_posix()
 SKY_RADIUS_M = 250.0            # sky dome radius, inside the far plane
 DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far plane

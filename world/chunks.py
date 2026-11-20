@@ -215,14 +215,18 @@ class ChunkStreamer:
     def update(self, x, z, budget=None):
         """Build up to ``budget`` (default TERRAIN_BUILDS_PER_FRAME) missing
         chunks, nearest first, and drop chunks more than radius + 1 away.
+        Per frame (no ``budget``) it also stops once TERRAIN_BUILD_MS is
+        spent, so streaming never costs more than about one chunk a frame.
         Returns the number built."""
+        stop = (time.perf_counter() + config.TERRAIN_BUILD_MS / 1000.0 if budget is None
+                else math.inf)
         budget = self.budget if budget is None else budget
         wanted = chunks_around(x, z, self.radius)
         built = 0
         for key in wanted:
             if key in self.loaded:
                 continue
-            if built >= budget:
+            if built >= budget or time.perf_counter() >= stop:
                 break
             t0 = time.perf_counter()
             name = f"chunk_{key[0]}_{key[1]}"
