@@ -1,5 +1,5 @@
 """Biomes (world/biomes.py), regions (world/regions.py) and roads
-(world/roads) as one drivable World (world/world.py)."""
+(worldgen/roads) as one drivable World (world/world.py)."""
 
 import dataclasses
 import math

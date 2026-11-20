@@ -89,7 +89,7 @@ def connector(a, b):
 
 
 class LaneMap:
-    """Lanes of a world.roads.RoadNetwork, made on demand and cached."""
+    """Lanes of a worldgen.roads.RoadNetwork, made on demand and cached."""
 
     def __init__(self, network):
         self.net = network

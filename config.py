@@ -32,7 +32,7 @@ SKYBOX_PNG = (ASSETS / "world" / "landscape" / "skybox.png").as_posix()
 SKY_RADIUS_M = 250.0            # sky dome radius, inside the far plane
 DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far plane
 
-# Biomes, regions and roads (world/biomes.py, world/regions.py, world/roads.py)
+# Biomes, regions and roads (worldgen/)
 WORLD_BIOMES = ("plains", "desert", "canyon", "coastal_beach", "jungle", "treacherous",
                 "village", "metropolis", "british_town")  # assets/world/definitions/<name>.json
 REGION_SCALE_M = 900.0          # spacing of the region sites that splotch the biomes
