@@ -60,7 +60,7 @@ def field(regions, x, z):
 
 
 def rules(regions, x, z):
-    """(grid, heading, spacing, curviness, loops) arrays at points: each
+    """(grid, heading, spacing, curviness, loops, L odds) arrays at points: each
     region's biome rules, blended by the terrain's region weights.  Each region adds its grid
     strength times the unit vector of 4 x its heading (a square grid repeats
     every quarter turn); the sum's length is the grid strength and its angle
@@ -74,11 +74,12 @@ def rules(regions, x, z):
         return np.stack([g * np.cos(a4), g * np.sin(a4),
                          [r.grid_spacing_m for r in rules],
                          [r.curviness_m for r in rules],
-                         [r.loop_odds for r in rules]], axis=1)
+                         [r.loop_odds for r in rules],
+                         [r.l_corner_odds for r in rules]], axis=1)
 
     v = regions.site_mean(x, z, per_site)
     return (np.hypot(v[:, 0], v[:, 1]), 0.25 * np.arctan2(v[:, 1], v[:, 0]),
-            v[:, 2], v[:, 3], v[:, 4])
+            v[:, 2], v[:, 3], v[:, 4], v[:, 5])
 
 
 @dataclass
@@ -92,21 +93,24 @@ class Graph:
     spacing: np.ndarray
     curv: np.ndarray       # curviness_m where the node stands
     loops: np.ndarray      # loop_odds where the node stands
+    l_odds: np.ndarray     # l_corner_odds where the node stands
     edges: list            # [(i, j)]
     dirs: dict = None      # {node: [departure headings]}
     ms: float = 0.0
 
     def node(self, k):
-        """(x, z, h, grid strength, curviness) of node k, plain floats."""
+        """(x, z, h, grid strength, curviness, L odds) of node k, plain floats."""
         return (float(self.x[k]), float(self.z[k]), float(self.h[k]), float(self.g[k]),
-                float(self.curv[k]))
+                float(self.curv[k]), float(self.l_odds[k]))
 
 
 def apex(seed, a, b):
-    """The bend point (x, z) of the road between nodes a and b, (x, z, h, g,
-    curv) each: the chord's midpoint bowed sideways by a hash of the two
-    ends, up to the nodes' mean curviness (none on a grid) and 0.3 x the
-    chord.  The same whichever end comes first."""
+    """The bend point (x, z) of the road between nodes a and b (Graph.node
+    tuples): the chord's midpoint bowed sideways by a hash of the two ends,
+    up to the nodes' mean curviness (none on a grid) and 0.3 x the chord.
+    With the nodes' mean l_corner_odds (none on a grid) it is instead the
+    corner of a square L: half the chord off the middle, legs at 45 degrees.
+    The same whichever end comes first."""
     if (b[0], b[1]) < (a[0], a[1]):
         a, b = b, a
     cx, cz = b[0] - a[0], b[1] - a[1]
@@ -115,6 +119,8 @@ def apex(seed, a, b):
     reach = min(0.5 * (a[4] + b[4]) * (1.0 - g), 0.3 * length)
     key = (round(a[0] * 8), round(a[1] * 8), round(b[0] * 8), round(b[1] * 8))
     bow = (2.0 * hash01(seed, 3, *key) - 1.0) * reach / max(length, 1e-9)
+    if hash01(seed, 4, *key) < 0.5 * (a[5] + b[5]) * (1.0 - g):
+        bow = math.copysign(0.5, bow)
     return 0.5 * (a[0] + b[0]) - cz * bow, 0.5 * (a[1] + b[1]) + cx * bow
 
 
@@ -129,7 +135,7 @@ def grow(regions, seed, ci, cj):
     ii, jj = np.meshgrid(np.arange(_N) + ci * _N, np.arange(_N) + cj * _N, indexing="ij")
     ii, jj = ii.ravel(), jj.ravel()
     qx, qz = (ii + 0.5) * PITCH_M, (jj + 0.5) * PITCH_M
-    g, th, sp, cv, lo = rules(regions, qx, qz)
+    g, th, sp, cv, lo, lc = rules(regions, qx, qz)
     is_grid = _hash_arr(seed, 31, ii, jj) < g
     # grid: snap to the turned lattice; keep when this cell holds the point
     u, w = _rot(qx, qz, -th)
@@ -143,7 +149,7 @@ def grow(regions, seed, ci, cj):
     x = np.where(is_grid, gx, ox)[sel]
     z = np.where(is_grid, gz, oz)[sel]
     graph = Graph(x, z, np.asarray(regions.height(x, z), float), is_grid[sel], g[sel],
-                  th[sel], sp[sel], cv[sel], lo[sel], [])
+                  th[sel], sp[sel], cv[sel], lo[sel], lc[sel], [])
     graph.dirs = {}
     graph.edges = _edges(graph, seed, ci, cj)
     graph.ms = (time.perf_counter() - t0) * 1000.0

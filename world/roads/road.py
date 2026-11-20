@@ -1,7 +1,8 @@
 """One road: its curve, height profile and how it flattens the ground.
 
-``build`` shapes an edge as a quadratic Bezier bowed by a hash (less on a
-grid), cut into ~SEGMENT_M segments; ``_profile`` smooths the terrain under
+``build`` shapes an edge through its layout ``apex``: one quadratic Bezier,
+or with the biome's ``corner_radius_m`` straight legs and a bend of that
+radius at the apex (0: a sharp corner), cut into ~SEGMENT_M segments; ``_profile`` smooths the terrain under
 it and clamps it to the biome's grade.  ``blend`` (point arrays) and
 ``blend_point`` (one point, plain Python for the physics tick) cut and fill
 the terrain: the road height within half the width, a smoothstep back to the
@@ -102,14 +103,38 @@ def build(regions, seed, key, a, b, biome):
     length = float(np.hypot(*(p2 - p0)))
     if length < 1e-3:
         return None
-    p1 = np.array(apex(seed, a, b))
-    n = max(4, math.ceil(1.05 * length / SEGMENT_M))
-    t = np.linspace(0.0, 1.0, n + 1)[:, None]
-    pts = (1 - t) ** 2 * p0 + 2 * t * (1 - t) * p1 + t * t * p2
+    pts = _shape(p0, np.array(apex(seed, a, b)), p2, biome.roads.corner_radius_m)
     ht = np.asarray(regions.height(pts[:, 0], pts[:, 1]), float)
     ht[0], ht[-1] = a[2], b[2]
     s = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))])
     return Road(key, pts, _profile(ht, s, biome.roads.max_grade_pct / 100.0), biome)
+
+
+def _line(p, q, n):
+    t = np.linspace(0.0, 1.0, n + 1)[:, None]
+    return p + t * (q - p)
+
+
+def _shape(p0, p1, p2, radius):
+    """Polyline from p0 to p2 bending at p1: one quadratic Bezier when
+    ``radius`` is None, else straight legs and a Bezier fillet whose ends
+    sit radius x tan(turn / 2) from p1 (clipped to the legs)."""
+    l1, l2 = float(np.hypot(*(p1 - p0))), float(np.hypot(*(p2 - p1)))
+    if radius is None or min(l1, l2) < 1e-6:
+        q0, q2 = p0, p2
+    else:
+        u1, u2 = (p1 - p0) / l1, (p2 - p1) / l2
+        turn = math.acos(min(max(float(u1 @ u2), -1.0), 1.0))
+        cut = radius * math.tan(0.5 * turn)
+        q0, q2 = p1 - u1 * min(cut, l1), p1 + u2 * min(cut, l2)
+    bend = float(np.hypot(*(q0 - p1)) + np.hypot(*(q2 - p1)))
+    t = np.linspace(0.0, 1.0, max(2, math.ceil(1.05 * bend / SEGMENT_M)) + 1)[:, None]
+    parts = [_line(p0, q0, math.ceil(np.hypot(*(q0 - p0)) / SEGMENT_M))[:-1],
+             (1 - t) ** 2 * q0 + 2 * t * (1 - t) * p1 + t * t * q2,
+             _line(q2, p2, math.ceil(np.hypot(*(p2 - q2)) / SEGMENT_M))[1:]]
+    pts = np.concatenate(parts)
+    keep = np.concatenate([[True], np.hypot(*np.diff(pts, axis=0).T) > 1e-6])
+    return pts[keep]
 
 
 def blend(roads, x, z, h, hx, hz):

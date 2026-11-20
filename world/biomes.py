@@ -75,6 +75,8 @@ class RoadRules:
     grid: float = 0.0                # 0 organic roads .. 1 a city grid
     grid_heading_deg: float | None = None  # grid heading; none: random per region
     loop_odds: float = 0.12          # organic: odds a short non-tree link makes a loop
+    l_corner_odds: float = 0.0       # organic: odds a road turns a square L corner
+    corner_radius_m: float | None = None  # bend radius; none: one smooth curve, 0: sharp
 
 
 @dataclass(frozen=True)
@@ -107,9 +109,11 @@ _LIMITS = {
     "grid": (0.0, 1.0),
     "grid_heading_deg": (-360.0, 360.0),
     "loop_odds": (0.0, 1.0),
+    "l_corner_odds": (0.0, 1.0),
+    "corner_radius_m": (0.0, 500.0),
 }
 _OPTIONAL_RGB = {"markings"}
-_OPTIONAL_NUMBER = {"grid_heading_deg"}
+_OPTIONAL_NUMBER = {"grid_heading_deg", "corner_radius_m"}
 
 
 def _is_number(v):

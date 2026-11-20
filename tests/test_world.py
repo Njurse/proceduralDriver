@@ -380,3 +380,24 @@ def test_no_junction_is_narrower_than_the_limit(seed):
             for hs in heads.values() for i, a in enumerate(hs) for b in hs[:i]]
     assert len(gaps) > 300
     assert math.degrees(min(gaps)) >= config.ROAD_MIN_JUNCTION_DEG - 0.5
+
+
+@pytest.mark.parametrize("radius", [0.0, 40.0])
+def test_l_corners_sharp_or_rounded_and_drivable(radius):
+    w = _two_biomes(grid=0.0, l_corner_odds=1.0, corner_radius_m=radius)
+    x, z = w.regions.site_of("village")
+    roads = [r for r in w.roads.roads_near(x - 300.0, z - 300.0, x + 300.0, z + 300.0)
+             if r.biome.name == "village"]
+    assert len(roads) > 5
+    for r in roads:
+        d = np.diff(r.pts, axis=0)
+        turn = np.degrees(np.abs(np.arctan2(d[1:, 1] * d[:-1, 0] - d[1:, 0] * d[:-1, 1],
+                                            np.einsum("ij,ij->i", d[1:], d[:-1]))))
+        assert 80.0 < turn.sum() < 100.0           # a square L overall
+        assert turn.max() > 80.0 if radius == 0.0 else turn.max() < 12.0  # kink or bend
+        k = int(np.argmax(turn)) + 1             # the corner: on the road all round it
+        for dx, dz in [(0, 0), (1, 1), (-1, 1), (1, -1), (-1, -1)]:
+            px = r.pts[k] + 0.6 * r.half_width * np.array([dx, dz]) / max(1, math.hypot(dx, dz))
+            assert w.query(*px)[3]
+        s = w.road_mesh(*(math.floor(c / config.TERRAIN_CHUNK_SIZE) for c in r.pts[k]))
+        assert s is not None and np.isfinite(s.pos).all()

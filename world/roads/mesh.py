@@ -19,9 +19,14 @@ def strips(roads, ground, x0, z0, x1, z1, lift):
             & (mid[:, 1] >= z0) & (mid[:, 1] < z1))[0]
         if not len(sel):
             continue
-        tan  = np.gradient(r.pts, axis=0)
+        seg  = np.diff(r.pts, axis=0)
+        seg /= np.linalg.norm(seg, axis=1, keepdims=True)
+        tan  = np.concatenate([seg[:1], seg[:-1] + seg[1:], seg[-1:]])
         tan /= np.linalg.norm(tan, axis=1, keepdims=True)
-        side = np.stack([-tan[:, 1], tan[:, 0]], axis=1) * r.half_width
+        # mitre: keep the full width through a bend, up to a sharp 90-120 deg corner
+        mitre = 1.0 / np.maximum(np.einsum("ij,ij->i", tan, np.concatenate([seg, seg[-1:]])),
+                                 0.5)
+        side = np.stack([-tan[:, 1], tan[:, 0]], axis=1) * (r.half_width * mitre)[:, None]
         s    = np.concatenate([[0.0], np.cumsum(np.hypot(r.dx, r.dz))])
         for k in sel:
             base = sum(len(p) for p in pos)

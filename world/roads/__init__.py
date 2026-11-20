@@ -48,8 +48,7 @@ class RoadNetwork:
         self.seed = regions.seed if seed is None else int(seed)
         self._graphs, self._cells = OrderedDict(), OrderedDict()
         self._roads, self._segs = {}, {}
-        self._reach = max(0.5 * b.roads.curviness_m + 0.5 * b.roads.width_m
-                          + b.roads.shoulder_m for b in regions.biomes)
+        self._reach = max(0.5 * b.roads.width_m + b.roads.shoulder_m for b in regions.biomes)
 
     def graph(self, ci, cj):
         """layout.Graph of super-cell (ci, cj)."""
@@ -73,8 +72,10 @@ class RoadNetwork:
             tiles, r = {}, self._reach
             for ra, rb in pairs:
                 ra, rb = min(ra, rb), max(ra, rb)
-                (ax, az, *_), (bx, bz, *_) = self._node(ra), self._node(rb)
-                box = (min(ax, bx) - r, min(az, bz) - r, max(ax, bx) + r, max(az, bz) + r)
+                a, b = self._node(ra), self._node(rb)
+                px, pz = layout.apex(self.seed, a, b)   # the road bulges to its apex
+                xs, zs = (a[0], b[0], px), (a[1], b[1], pz)
+                box = (min(xs) - r, min(zs) - r, max(xs) + r, max(zs) + r)
                 ref = (ra + rb, ra, rb, box)
                 for ti in range(math.floor(box[0] / _TILE_M), math.floor(box[2] / _TILE_M) + 1):
                     for tj in range(math.floor(box[1] / _TILE_M),
