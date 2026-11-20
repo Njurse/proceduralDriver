@@ -21,6 +21,7 @@ from core.car_forces import (
     car_forces,
     flat_ground,
 )
+from core.engine import EngineState, control_car_revs
 from core.physics_helpers import (
     CAR_PAD_ACCEL,
     CAR_PAD_BRAKE,
@@ -96,7 +97,6 @@ class Vehicle:
         self.wheels = [Wheel() for _ in range(4)]
         self.pad = 0
         self.analog_steer = None
-        self.changing_gear = False
         self.throttle_input = 0.0
         self.brake_input = 0.0
         self.steer_input = 0.0
@@ -120,6 +120,7 @@ class Vehicle:
         self.rot = quat.to_matrix(self.quat)
         self.compression = np.full(4, -GRAVITY / (4.0 * SUS_STIFFNESS))
         self.pad_state = PadState()
+        self.engine = EngineState()
         self.wheel_speed = 0.0  # hd.wheel_speed, m/s along the heading
         for w in self.wheels:
             w.__init__()
@@ -142,6 +143,18 @@ class Vehicle:
     def speed(self) -> float:
         """Signed speed along the heading, m/s."""
         return self.forward_speed
+
+    @property
+    def changing_gear(self) -> bool:
+        return self.engine.changing_gear
+
+    @property
+    def revs(self) -> float:
+        return self.engine.revs
+
+    @property
+    def gear(self) -> int:
+        return self.engine.gear
 
     @property
     def wheel_angle(self) -> float:
@@ -181,7 +194,7 @@ class Vehicle:
             power_ratio=self.cos.power_ratio,
             wheel_speed=self.wheel_speed,
             hnd_type=self.hnd_type,
-            changing_gear=self.changing_gear,
+            changing_gear=self.engine.changing_gear,
         )
         f = car_forces(self, self.pad_state, self.geo, dt, self.ground, self.hnd_type)
         ps = self.pad_state
@@ -189,6 +202,10 @@ class Vehicle:
                                   f.thrust, ps.handbrake, f.wheelspin)
         self._integrate(f.acc, f.alpha, dt)
         self.wheel_speed = f.wheel_speed
+        self.engine = control_car_revs(
+            self.engine, dt, thrust=f.thrust, wheelspin=f.wheelspin,
+            rear_grounded=self.compression[1] > 0.0 or self.compression[3] > 0.0,
+            wheel_speed=f.wheel_speed)
         self._update_wheels(f.wheels)
 
     def _integrate(self, acc, alpha, dt) -> None:
