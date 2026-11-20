@@ -1,5 +1,5 @@
 """worldgen.roads.roadside: per-biome strips along the roads, deterministic,
-absent where a biome lays none."""
+absent where a biome lays none, and kept clear by the structures."""
 
 import math
 import os
@@ -13,7 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from world.world import World  # noqa: E402
 from worldgen.biomes import parse_biome  # noqa: E402
 from worldgen.query import WorldGround  # noqa: E402
+from worldgen.roads.roadside import reach  # noqa: E402
 from worldgen.spec import WorldSpec  # noqa: E402
+from worldgen.structures.base import poly_distance  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -69,3 +71,20 @@ def test_bad_profiles_are_errors():
         parse_biome({"roads": {"roadside": {"side_m": 1.0, "curb_m": 2.0}}})
     with pytest.raises(ValueError, match="unknown"):
         parse_biome({"roads": {"roadside": {"width_m": 1.0}}})
+
+
+@pytest.mark.parametrize("biome", ["metropolis", "british_town", "desert"])
+def test_no_structure_stands_on_a_roadside(world, biome):
+    n = 0
+    for key in _keys(world, biome):
+        for s in world.structures.chunk(*key):
+            lo, hi = s.footprint.min(axis=0), s.footprint.max(axis=0)
+            gx, gz = np.meshgrid(np.arange(lo[0], hi[0], 0.5), np.arange(lo[1], hi[1], 0.5))
+            gx, gz = gx.ravel(), gz.ravel()
+            inside = poly_distance(s.footprint, gx, gz) == 0.0
+            gx, gz = gx[inside], gz[inside]
+            for r in world.roads.roads_near(lo[0] - 20, lo[1] - 20, hi[0] + 20, hi[1] + 20):
+                t = r.terms(gx, gz)
+                assert (t[0] >= reach(r)).all(), (s.kind, s.pos, float(t[0].min()), reach(r))
+            n += 1
+    assert n > 0

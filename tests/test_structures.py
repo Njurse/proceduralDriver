@@ -17,7 +17,7 @@ from worldgen.structures import structures_mesh  # noqa: E402
 from worldgen.structures.base import poly_distance  # noqa: E402
 
 #              biome           kind counts over 5 x 5 chunks round a region site
-COUNTS = {"metropolis": {"tower": (25, 250)},
+COUNTS = {"metropolis": {"tower": (25, 250), "storefront": (40, 400)},
           "desert": {"rock": (3, 80), "cactus": (1, 40), "pole": (1, 60)},
           "british_town": {"cottage": (3, 60), "tree": (1, 60), "shrub": (1, 60)}}
 

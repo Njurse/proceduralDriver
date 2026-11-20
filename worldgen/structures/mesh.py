@@ -80,11 +80,15 @@ def _instance(bld, s):
         below = (c[0], top - 1.0, c[1])
         for e in range(k):
             bld.tri(_p(c, top), _p(fp[e], top), _p(fp[(e + 1) % k], top), below, roof)
-    if s.trim is not None and s.height >= 8.0:
-        ya = y0 + 0.86 * s.height
-        yb = ya + max(0.8, 0.03 * s.height)
+    if s.trim is not None and (s.trim_y is not None or s.height >= 8.0):
+        if s.trim_y is None:      # a band near the top
+            ya, out_m = y0 + 0.86 * s.height, 0.15
+            yb = ya + max(0.8, 0.03 * s.height)
+        else:                     # an awning / sign band standing out at street level
+            ya, out_m = y0 + s.trim_y, 0.6
+            yb = ya + 0.7
         out = arr - np.array(c)
-        grow = arr + 0.15 * out / np.maximum(np.linalg.norm(out, axis=1)[:, None], 1e-9)
+        grow = arr + out_m * out / np.maximum(np.linalg.norm(out, axis=1)[:, None], 1e-9)
         for e in range(k):
             a, b = grow[e], grow[(e + 1) % k]
             bld.quad(_p(a, ya), _p(b, ya), _p(b, yb), _p(a, yb), inside, s.trim,

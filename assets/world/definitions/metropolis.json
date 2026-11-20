@@ -38,6 +38,7 @@
     "roadside": {"side_m": 4.0, "lift_m": 0.15, "curb_m": 0.35, "color": [0.5, 0.5, 0.52], "curb_color": [0.7, 0.7, 0.68], "edge_light": 0.15}
   },
   "structures": [
-    {"gen": "voronoi_towers"}
+    {"gen": "voronoi_towers", "road_margin_m": 10.5},
+    {"gen": "frontage", "road_margin_m": 0.2}
   ]
 }

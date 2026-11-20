@@ -3,23 +3,26 @@
 A biome lists its generators in JSON (``"structures": [{"gen": ..., ...}]``);
 ``Structures(ground).chunk(ci, ck)`` runs each rule of every biome present
 in the chunk and keeps the instances whose footprint lies inside that
-biome, at least ``road_margin_m`` (default 2.5) off every road surface and
-on ground no steeper than ``max_slope_deg`` (default 12).  ``mesh`` turns
-instances into one ChunkMesh.  Generators: voronoi_towers, scatter, cottages.
+biome, at least ``road_margin_m`` (default 2.5) off every road and its
+roadside (sidewalk, verge, wall: biome ``roads.roadside``) and on ground no
+steeper than ``max_slope_deg`` (default 12).  ``mesh`` turns instances into
+one ChunkMesh.  Generators: voronoi_towers, frontage, scatter, cottages.
 """
 
 import math
 
 import numpy as np
 
-from worldgen.structures import cottages, scatter, towers  # noqa: F401  (they register)
-from worldgen.structures.base import GENERATORS, Context, Instance, poly_distance
+from worldgen.roads.roadside import reach
+from worldgen.structures import cottages, frontage, scatter, towers  # noqa: F401  (they register)
+from worldgen.structures.base import GENERATORS, Context, Instance, seg_distance
 from worldgen.structures.mesh import structures_mesh
 
 __all__ = ["GENERATORS", "Instance", "Structures", "structures_mesh"]
 
 _REACH_M = 60.0          # road points gathered this far round the chunk
 _FILTER_KEYS = ("gen", "max_slope_deg", "road_margin_m")
+_PAD_M = 2.5                  # half a road segment, and some
 
 
 class Structures:
@@ -52,27 +55,31 @@ class Structures:
             return []
         roads = g.roads.roads_near(x0 - _REACH_M, z0 - _REACH_M, x1 + _REACH_M, z1 + _REACH_M)
         pts = np.concatenate([r.pts for r in roads]) if roads else np.zeros((0, 2))
-        hw = (np.concatenate([np.full(len(r.pts), r.half_width) for r in roads])
-              if roads else np.zeros(0))
-        ctx = Context(g, g.spec.seed, 0, ci, ck, x0, z0, x1, z1, (pts, hw))
+        edge = (np.concatenate([np.full(len(r.pts), reach(r)) for r in roads])
+                if roads else np.zeros(0))
+        segs = ((np.concatenate([r.pts[:-1] for r in roads]),
+                 np.concatenate([r.pts[1:] for r in roads]),
+                 np.concatenate([np.full(len(r.pts) - 1, reach(r)) for r in roads]))
+                if roads else None)
+        ctx = Context(g, g.spec.seed, 0, ci, ck, x0, z0, x1, z1, (pts, edge), tuple(roads))
         out = []
         for b, gen, params, salt, slope, margin in rules:
             ctx.salt = salt
-            out += self._keep([s for s in gen(ctx, params) if self._clear(s, margin, pts, hw)],
+            out += self._keep([s for s in gen(ctx, params) if self._clear(s, margin, segs)],
                               b, slope)
         return out
 
     @staticmethod
-    def _clear(s, margin, pts, hw):
-        """True when footprint ``s`` stays ``margin`` off every road surface."""
-        if not len(pts):
+    def _clear(s, margin, segs):
+        """True when footprint ``s`` stays ``margin`` off every road and its roadside."""
+        if segs is None:
             return True
+        a, b, edge = segs
         fp = s.footprint
-        lo, hi = fp.min(axis=0) - 40.0, fp.max(axis=0) + 40.0
-        m = ((pts >= lo) & (pts <= hi)).all(axis=1)
-        # road points are <= 4 m apart: 2 m more covers the surface between them
-        return not (m.any() and (poly_distance(fp, pts[m, 0], pts[m, 1]) - hw[m]
-                                 < margin + 2.0).any())
+        pad = margin + _PAD_M        # segments are ~4 m: one end is within reach + 2
+        lo, hi = fp.min(axis=0) - pad, fp.max(axis=0) + pad
+        m = ((a >= lo - edge[:, None]) & (a <= hi + edge[:, None])).all(axis=1)
+        return not (m.any() and (seg_distance(fp, a[m], b[m]) - edge[m] < margin).any())
 
     def _keep(self, cands, b, slope):
         """The candidates wholly inside biome ``b`` on gentle ground, with base_y set.

@@ -6,7 +6,8 @@ a name a biome's JSON can use::
     "structures": [{"gen": "voronoi_towers", "cell_m": 34}]
 
 It proposes instances anchored in ctx's chunk; worldgen.structures keeps
-the ones inside the biome, clear of the roads and on gentle ground.
+the ones inside the biome, clear of the roads and their roadsides (sidewalks,
+verges, walls) and on gentle ground.
 Everything is a pure function of (seed, chunk, params): no RNG state.
 """
 
@@ -49,6 +50,7 @@ class Instance:
     roof_color: tuple | None = None
     trim: tuple | None = None
     emissive: bool = False
+    trim_y: float | None = None  # the trim as an awning this high; none: near the top
     base_y: float = 0.0        # set by the filter: the lowest ground under the footprint
 
 
@@ -65,7 +67,9 @@ class Context:
     z0: float
     x1: float
     z1: float
-    roads: tuple = (np.zeros((0, 2)), np.zeros(0))   # road centre points (n, 2), half widths
+    # road centre points (n, 2) and how far each road's roadside reaches from its centre
+    roads: tuple = (np.zeros((0, 2)), np.zeros(0))
+    road_list: tuple = ()      # the worldgen.roads.road.Road objects near the chunk
 
     def owns(self, x, z):
         """True where (x, z) anchors in this chunk."""
@@ -120,14 +124,46 @@ def prism(cx, cz, r, sides, yaw):
 
 def poly_distance(poly, px, pz):
     """Distance from each point to convex ``poly`` (0 inside)."""
-    a, b = poly, np.roll(poly, -1, axis=0)
-    ex, ez = (b - a)[:, 0], (b - a)[:, 1]
+    a = poly
+    e = np.concatenate([poly[1:], poly[:1]]) - a
+    ex, ez = e[:, 0], e[:, 1]
     rx, rz = px[:, None] - a[None, :, 0], pz[:, None] - a[None, :, 1]
     cross = ex[None, :] * rz - ez[None, :] * rx
     inside = (cross <= 0.0).all(axis=1) | (cross >= 0.0).all(axis=1)
     t = np.clip((rx * ex + rz * ez) / np.maximum(ex * ex + ez * ez, 1e-12), 0.0, 1.0)
     d = np.hypot(rx - t * ex, rz - t * ez).min(axis=1)
     return np.where(inside, 0.0, d)
+
+
+def seg_distance(poly, a, b):
+    """Distance from convex ``poly`` to each segment a[i] -> b[i] (0 where they meet)."""
+    d = b - a
+    ln2 = np.sum(d * d, axis=1)
+    rx = poly[:, 0][:, None] - a[None, :, 0]
+    rz = poly[:, 1][:, None] - a[None, :, 1]
+    t = np.clip((rx * d[:, 0] + rz * d[:, 1]) / np.maximum(ln2, 1e-12), 0.0, 1.0)
+    out = np.hypot(rx - t * d[:, 0], rz - t * d[:, 1]).min(axis=0)
+    out = np.minimum(out, poly_distance(poly, a[:, 0], a[:, 1]))
+    out = np.minimum(out, poly_distance(poly, b[:, 0], b[:, 1]))
+    # a segment through the polygon with both ends outside crosses an edge; its
+    # ends are then nearer the polygon than its length, so only those are tested
+    sel = np.nonzero(out * out < ln2)[0]
+    if len(sel):
+        p, e = poly, np.concatenate([poly[1:], poly[:1]]) - poly
+        a, d = a[sel], d[sel]
+        b = a + d
+
+        def side(ox, oz, vx, vz, x, z):     # sign of v x (point - o)
+            return np.sign(vx * (z - oz) - vz * (x - ox))
+
+        px, pz, ex, ez = (v[:, None] for v in (p[:, 0], p[:, 1], e[:, 0], e[:, 1]))
+        s1 = side(px, pz, ex, ez, a[:, 0], a[:, 1])
+        s2 = side(px, pz, ex, ez, b[:, 0], b[:, 1])
+        s3 = side(a[:, 0], a[:, 1], d[:, 0], d[:, 1], px, pz)
+        s4 = side(a[:, 0], a[:, 1], d[:, 0], d[:, 1], px + ex, pz + ez)
+        hit = ((s1 * s2 < 0) & (s3 * s4 < 0)).any(axis=0)
+        out[sel[hit]] = 0.0
+    return out
 
 
 def pick(h, options):
