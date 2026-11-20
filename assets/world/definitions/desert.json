@@ -1,6 +1,7 @@
 {
   "name": "desert",
   "description": "Sand sea: long, tall dunes crossed by a sparse grid of winding packed-sand tracks.",
+  "encroach": 0.3,
   "terrain": {
     "noise_scale_m": 260.0,
     "amplitude_m": 14.0,

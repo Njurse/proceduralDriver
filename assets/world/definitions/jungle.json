@@ -1,6 +1,7 @@
 {
   "name": "jungle",
   "description": "Deep green jungle: short, close hills and narrow winding dirt lanes that wander off the grid.",
+  "encroach": 0.4,
   "weight": 0.9,
   "terrain": {
     "noise_scale_m": 110.0,

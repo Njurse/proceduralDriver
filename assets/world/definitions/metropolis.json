@@ -1,6 +1,7 @@
 {
   "name": "metropolis",
   "description": "Metropolis: a huge, nearly flat city of grey concrete with a dense grid of wide avenues.",
+  "encroach": 0.5,
   "weight": 0.7,
   "region_size": 4,
   "terrain": {
