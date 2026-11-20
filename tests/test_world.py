@@ -13,14 +13,17 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config  # noqa: E402
-from core.car_forces import SURFACE_OFFROAD, SURFACE_ROAD  # noqa: E402
 from core.car_profile import load_cosmetics  # noqa: E402
 from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
 from world.spec import load_biome, load_biomes  # noqa: E402
 from world.world import World  # noqa: E402
 from worldgen.biomes import parse_biome  # noqa: E402
 from worldgen.chunk import chunk_mesh  # noqa: E402
-from worldgen.ground import Ground  # noqa: E402
+from worldgen.ground import (  # noqa: E402
+    SURFACE_OFFROAD,
+    SURFACE_ROAD,
+    Ground,  # noqa: E402
+)
 from worldgen.palette import terrain_colors  # noqa: E402
 from worldgen.roads import MARKING_LIFT, layout  # noqa: E402
 

@@ -10,9 +10,9 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config  # noqa: E402
-from core.car_forces import SURFACE_ROAD  # noqa: E402
 from world.traffic import Car, Traffic  # noqa: E402
 from world.world import World  # noqa: E402
+from worldgen.ground import SURFACE_ROAD  # noqa: E402
 from worldgen.roads.lanes import LaneMap, connector  # noqa: E402
 
 

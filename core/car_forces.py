@@ -28,7 +28,7 @@ from core.units import (
     dr2_length,
     dr2_velocity,
 )
-from worldgen.ground import SURFACE_GRASS, SURFACE_OFFROAD, SURFACE_ROAD  # noqa: F401
+from worldgen.ground import SURFACE_GRASS, SURFACE_ROAD
 
 F = C_FRAME_HZ
 UP = np.array([0.0, 1.0, 0.0])
