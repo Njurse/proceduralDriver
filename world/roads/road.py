@@ -77,23 +77,39 @@ class Road:
         b = self.bbox
         return b[0] <= x1 and x0 <= b[2] and b[1] <= z1 and z0 <= b[3]
 
-    def terms(self, x, z):
+    def terms(self, x, z, reach=None):
         """Per-point: distance, road height, height gradient x/z,
-        unit distance-gradient x/z, nearest segment index."""
-        px = x[:, None] - self.ax
-        pz = z[:, None] - self.az
-        t  = np.clip((px * self.dx + pz * self.dz) * self.inv_len2, 0.0, 1.0)
-        cx = px - t * self.dx
-        cz = pz - t * self.dz
+        unit distance-gradient x/z, nearest segment index.  With ``reach``
+        only segments within reach of the points' bounding box are searched
+        (points farther than ``reach`` then get some farther segment); None
+        when there are none."""
+        ax, az, dx, dz, il, sel = self.ax, self.az, self.dx, self.dz, self.inv_len2, None
+        if reach is not None:
+            bx, bz = ax + dx, az + dz
+            m = ((np.minimum(ax, bx) <= x.max() + reach) & (np.maximum(ax, bx) >= x.min() - reach)
+                 & (np.minimum(az, bz) <= z.max() + reach)
+                 & (np.maximum(az, bz) >= z.min() - reach))
+            if not m.any():
+                return None
+            if not m.all():
+                sel = np.nonzero(m)[0]
+                ax, az, dx, dz, il = ax[sel], az[sel], dx[sel], dz[sel], il[sel]
+        px = x[:, None] - ax
+        pz = z[:, None] - az
+        t  = np.clip((px * dx + pz * dz) * il, 0.0, 1.0)
+        cx = px - t * dx
+        cz = pz - t * dz
         k  = np.argmin(cx * cx + cz * cz, axis=1)
         r  = np.arange(len(x))
         t, cx, cz = t[r, k], cx[r, k], cz[r, k]
         d  = np.hypot(cx, cz)
+        dxk, dzk, ilk = dx[k], dz[k], il[k]
+        if sel is not None:
+            k = sel[k]
         hr = self.h[k] + t * self.dh[k]
-        g  = np.where((t > 0.0) & (t < 1.0),
-                      self.dh[k] * self.inv_len2[k], 0.0)
+        g  = np.where((t > 0.0) & (t < 1.0), self.dh[k] * ilk, 0.0)
         inv = np.where(d > 1e-9, 1.0 / np.maximum(d, 1e-9), 0.0)
-        return d, hr, g * self.dx[k], g * self.dz[k], cx * inv, cz * inv, k
+        return d, hr, g * dxk, g * dzk, cx * inv, cz * inv, k
 
 
 
@@ -144,7 +160,10 @@ def blend(roads, x, z, h, hx, hz):
     s0 = s1 = s0x = s0z = s1x = s1z = 0.0
     weights = []
     for r in roads:
-        d, hr, hrx, hrz, ddx, ddz, _ = r.terms(x, z)
+        near = r.terms(x, z, reach=r.half_width + r.shoulder)
+        if near is None:        # no segment within reach: weight 0, off the road
+            continue
+        d, hr, hrx, hrz, ddx, ddz, _ = near
         on_road |= d <= r.half_width
         if not r.flatten:
             continue
