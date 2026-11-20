@@ -47,6 +47,7 @@ from core.gamepad import Gamepad
 from core.orbit_camera import OrbitCamera, orbit_offset
 from core.redriver2_physics import Input, PhysicsWorld, Vehicle
 from core.textures import _to_texture, load_color_keyed, seamless_fbm
+from core.units import DR2_UNITS_PER_METRE
 from core.vehicle_audio import AudioManager, sound_input
 from world.chunks import ChunkStreamer, detail_texture
 from world.terrain import Terrain
@@ -57,6 +58,7 @@ log = logging.getLogger("main")
 SHOTS = (("world_chase", 0.0), ("world_left_side", -90.0), ("world_right_side", 90.0),
          ("world_front_looking_back", 180.0))
 CAM_TERRAIN_CLEARANCE = 0.6  # keep the chase camera this far above the hills
+MAX_CAR_EXTENT_M = 20.0      # a longer model is in Driver 2 units, not metres
 TYRE_WIDTH_M = 0.14          # gap between a wheel's outer and inner planes
 TYRE_BAND_RADIUS = 0.94      # tread diamond corners, fraction of the wheel radius
 
@@ -72,6 +74,24 @@ def _mat4(a, t=(0.0, 0.0, 0.0)):
                 a[0, 1], a[1, 1], a[2, 1], 0.0,
                 a[0, 2], a[1, 2], a[2, 2], 0.0,
                 t[0], t[1], t[2], 1.0)
+
+
+def _model_unit_scale(model, name):
+    """Metres per model unit: 1, or 1/150 for an OBJ still in Driver 2 units.
+
+    A car exported straight from Driver 2 units (or re-exported from Blender
+    without the /150) is ~750 m long: the chase camera then sits inside it
+    and every face is culled, so the car looks invisible.
+    """
+    bounds = model.getTightBounds()
+    if not bounds:
+        return 1.0
+    extent = max(bounds[1] - bounds[0])
+    if extent <= MAX_CAR_EXTENT_M:
+        return 1.0
+    log.warning("[car] %s is %.0f units long: treating it as Driver 2 units (/%d)",
+                name, extent, DR2_UNITS_PER_METRE)
+    return 1.0 / DR2_UNITS_PER_METRE
 
 
 def _tyre_band(radius, width):
@@ -213,7 +233,7 @@ class DriveSim(ShowBase):
         # physics body frame negated (cars.c UpdateCarDrawMatrix), so a -1
         # scale maps it in.  Both origins are the car's centre of gravity.
         self.car_body = self.render.attachNewNode("car_body")
-        self.car.setScale(-1.0)
+        self.car.setScale(-_model_unit_scale(self.car, rel))
         # The OBJ faces are wound for Driver 2's y-down screen space, so cull
         # the other side.
         self.car.setAttrib(CullFaceAttrib.makeReverse())
