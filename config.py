@@ -250,19 +250,26 @@ INVENTORY_ROWS = 4
 # Driving / REDRIVER2 handling model
 # ---------------------------------------------------------------------------
 # Car model loading ---------------------------------------------------------
-# The havana (and other) car models are authored with inverted vertical (Y)
-# coordinates in some exports.  Set this flag (or per-profile) to flip the
-# vertical axis when loading/rendering the mesh.
-CAR_MODEL_INVERT_VERTICAL = True
+# The havana OBJ is authored Y-up (roof at +Y, wheels below) and faces -Z
+# (headlights at z=-363 in handling.json).  Do NOT flip the vertical axis.
+CAR_MODEL_INVERT_VERTICAL = False
 HAVANA_MODEL_DIR = (ASSETS / "vehicle" / "havana_model0").as_posix()
 HAVANA_HANDLING_JSON = (ASSETS / "vehicle" / "havana_model0" / "handling.json").as_posix()
 HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.obj").as_posix()
-# config.py
 HAVANA_SHIP_SCALE = 0.01
-DRIVE_CAR_PITCH_OFFSET = -90.0   # model long axis (Z) -> Panda3D +Y (forward)
-DRIVE_CAR_YAW_OFFSET   = 180.0   # fine-tune facing; was previously baked + lost
-HAVANA_WHEEL_SCALE = 0.5
+# Model -> Panda3D: pitch +90 deg about X maps model +Y -> Panda +Z (up) and
+# model -Z (nose) -> Panda +Y (forward).  Yaw is a fine-tune knob (0 = nose
+# points along the physics forward axis).
+DRIVE_CAR_PITCH_OFFSET = 90.0
+DRIVE_CAR_YAW_OFFSET = 0.0
+# Wheel disc scale is in model units: 70 * 0.5 * HAVANA_SHIP_SCALE = 0.35 m
+# rolling radius, matching core.vehicle3d's wheel_speed divisor.
+HAVANA_WHEEL_SCALE = 70.0
 HAVANA_WHEEL_TEXTURES = (ASSETS / "vehicle" / "wheels" / "havana").as_posix()
+# Driving world -------------------------------------------------------------
+DRIVE_REVERSE_MULT = 0.45       # reverse throttle as a fraction of MAX_DRIVE
+DRIVE_FOG_DENSITY = 0.005       # exponential fog density for the ground plane
+DRIVE_BOUNDARY_MARGIN = 12.0    # keep the car this far inside the ground quad
 
 # Fixed-point / physics -----------------------------------------------------
 ONE = 4096

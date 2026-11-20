@@ -6,7 +6,6 @@ import sys
 import time
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
-os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from core.mathutil import clamp
 
@@ -132,8 +131,13 @@ class Gamepad:
             return self.pygame
         try:
             import pygame
-            if not pygame.display.get_init():
-                pygame.display.init()
+            # A display is not required for joysticks; only try to bring one up
+            # when the platform already provides a working video driver.
+            try:
+                if not pygame.display.get_init():
+                    pygame.display.init()
+            except Exception as exc:
+                log.debug("[gamepad] pygame display init failed: %s", exc)
             if not pygame.joystick.get_init():
                 pygame.joystick.init()
             self.pygame = pygame

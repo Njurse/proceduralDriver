@@ -51,36 +51,43 @@ class AudioManager:
         self._init_mixer()
 
     def _init_mixer(self):
+        log = logging.getLogger("vehicle_audio")
         if not _HAS_PYGAME:
+            log.warning("[audio] pygame is unavailable; vehicle audio disabled")
             return
         try:
             pygame.mixer.init(frequency=22050, size=-16, channels=3)
-        except Exception:
+        except Exception as exc:
+            log.warning("[audio] mixer init failed (%s); trying defaults", exc)
             try:
                 pygame.mixer.init()
-            except Exception:
+            except Exception as exc2:
+                log.warning("[audio] mixer unavailable; vehicle audio disabled: %s",
+                            exc2)
                 return
         try:
             pygame.mixer.set_num_channels(8)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("[audio] set_num_channels failed: %s", exc)
         self.engine_ch = pygame.mixer.Channel(0)
         self.idle_ch = pygame.mixer.Channel(1)
         self.skid_ch = pygame.mixer.Channel(2)
 
         snds = self.cos.sounds
-        try:
-            if os.path.exists(snds.get("engine", "")):
-                self.engine_snd = pygame.mixer.Sound(snds["engine"])
-                self.engine_snd.set_volume(0.0)
-            if os.path.exists(snds.get("idle", "")):
-                self.idle_snd = pygame.mixer.Sound(snds["idle"])
-                self.idle_snd.set_volume(0.0)
-            if os.path.exists(snds.get("skid", "")):
-                self.skid_snd = pygame.mixer.Sound(snds["skid"])
-                self.skid_snd.set_volume(0.0)
-        except Exception:
-            pass
+        log.debug("[audio] sound paths: %s", snds)
+        for key, attr in (("engine", "engine_snd"), ("idle", "idle_snd"),
+                          ("skid", "skid_snd")):
+            path = snds.get(key, "")
+            if not path or not os.path.exists(path):
+                log.warning("[audio] %s sound missing: %s", key, path)
+                continue
+            try:
+                snd = pygame.mixer.Sound(path)
+                snd.set_volume(0.0)
+                setattr(self, attr, snd)
+            except Exception as exc:
+                log.warning("[audio] failed to load %s sound %s: %s",
+                            key, path, exc)
 
         # start loops at zero volume
         if self.engine_snd is not None:
