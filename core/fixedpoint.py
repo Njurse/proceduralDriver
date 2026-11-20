@@ -1,43 +1,44 @@
-"""Fixed-point helpers ported from REDRIVER2 (dr2math.h).
+"""Fixed-point helpers for REDRIVER2 C interop (Game/dr2math.h).
 
-Core vehicle state/forces use integer math with ONE=4096 (4096 = 1.0).
-Floats are only used at the render/HUD boundary.  Python ints are arbitrary
-precision, so arithmetic is exact and traceable to the C source; note that C's
-``>> 12`` truncates toward zero for negatives, which differs from Python's
-floor division -- ``FIXEDH`` (FixHalfRound) mitigates this.
+The handling model itself runs in float64 (see core.physics_helpers); these
+helpers exist to read/convert C-scaled data (ONE = 4096 = 1.0, 4096 angle
+units = one full turn) and to mirror the C macros where code still needs them.
+Python's ``>>`` on ints is an arithmetic shift, which is what the C macros
+compile to for signed ints on every target REDRIVER2 builds for.
 """
 
+import math
+
 ONE = 4096
-FIXED_SHIFT = 12
+ONE_BITS = 12
+FIXED_SHIFT = ONE_BITS  # backwards-compatible alias
 
 
-def FixHalfRound(x: int, bits: int = FIXED_SHIFT) -> int:
-    """Round x to nearest 2**bits, C-style (toward zero on ties-ish)."""
-    """Round x to the nearest multiple of 2**bits, ties away-ish (C style)."""
-    if x >= 0:
-        return (x + (1 << (bits - 1))) >> bits
-    return (x - (1 << (bits - 1))) >> bits
+def FixHalfRound(x: int, bits: int = ONE_BITS) -> int:
+    """dr2math.h FixHalfRound: ((x) + (1 << (bits-1))) >> bits.
+
+    Rounds half toward +infinity for every sign: FixHalfRound(-1) == 0 and
+    FixHalfRound(-2048) == 0, FixHalfRound(-2049) == -1.
+    """
+    return (x + (1 << (bits - 1))) >> bits
 
 
 def FIXEDH(a: int) -> int:
-    """FixHalfRound(a, 12) -- half-round to integer world units."""
-    return FixHalfRound(a, FIXED_SHIFT)
+    """dr2math.h FIXEDH: FixHalfRound(a, ONE_BITS)."""
+    return FixHalfRound(a, ONE_BITS)
 
 
 def FIXED(a: int) -> int:
-    """a >> 12 -- truncate fixed-point to integer (toward zero)."""
-    """a >> 12 -- truncate fixed-point to integer."""
-    if a >= 0:
-        return a >> FIXED_SHIFT
-    # C truncates toward zero.
-    return -((-a) >> FIXED_SHIFT)
+    """dr2math.h FIXED: a >> ONE_BITS (arithmetic shift, floors negatives)."""
+    return a >> ONE_BITS
 
 
 def ABS(a: int) -> int:
     return a if a >= 0 else -a
 
 
-def clamp(a, lo, hi) -> int:  # works for int/float inputs
+def clamp(a, lo, hi):
+    """Clamp a into [lo, hi]; works for ints and floats."""
     if a < lo:
         return lo
     if a > hi:
@@ -45,39 +46,44 @@ def clamp(a, lo, hi) -> int:  # works for int/float inputs
     return a
 
 
-# Trig tables: 4096-entry circle.  We approximate with Python math but keep the
-# 4096-quantised angle interface so call sites match REDRIVER2.
-import math as _math
-
-def _build_trig():
-    tbl = []
-    for i in range(ONE):
-        ang = (i / ONE) * 2.0 * _math.pi
-        tbl.append((_math.sin(ang), _math.cos(ang)))  # (sin, cos) per C layout
-    return tbl
-
-_TRIG = _build_trig()
+# PsyCross/src/gte/rcossin_tbl.h holds round(sin(i*2pi/4096) * 4096) and the
+# matching cos for i in 0..4095; regenerating it with round() reproduces all
+# 8192 entries exactly (checked against the C header), so no data is ported.
+_RSIN_TBL = tuple(round(math.sin(i * math.tau / ONE) * ONE) for i in range(ONE))
+_RCOS_TBL = tuple(round(math.cos(i * math.tau / ONE) * ONE) for i in range(ONE))
 
 
 def RSIN(a: int) -> int:
-    """Sine of angle a (4096 circle units). Returns fixed-point int."""
-    idx = a & (ONE - 1)
-    return int(_TRIG[idx][0] * ONE)
+    """dr2math.h RSIN: rcossin_tbl[(a & 4095) * 2]."""
+    return _RSIN_TBL[a & (ONE - 1)]
 
 
 def RCOS(a: int) -> int:
-    """Cosine of angle a (4096 circle units). Returns fixed-point int."""
-    idx = a & (ONE - 1)
-    return int(_TRIG[idx][1] * ONE)
+    """dr2math.h RCOS: rcossin_tbl[(a & 4095) * 2 + 1]."""
+    return _RCOS_TBL[a & (ONE - 1)]
 
 
 def ratan2(y, x) -> int:
-    """atan2 in 4096 circle units."""
+    """atan2 in 4096-per-turn units, C sign convention (LIBGTE.C ratan2).
+
+    Like the C it returns a signed angle in [-2048, 2048] (not masked to
+    0..4095) and 0 for (0, 0).  Intentional deviation: computed with float
+    atan2 and rounded instead of the 1025-entry ratan_tbl lookup, so results
+    can differ from the PSX table by +-1 unit (table quantisation artifact).
+    """
     if x == 0 and y == 0:
         return 0
-    ang = _math.atan2(y, x)  # radians
-    val = int((ang / (2.0 * _math.pi)) * ONE)
-    return val & (ONE - 1)
+    return round(math.atan2(y, x) * ONE / math.tau)
+
+
+def angle_to_rad(units: float) -> float:
+    """C angle units (4096 per turn) to radians."""
+    return units * math.tau / ONE
+
+
+def rad_to_angle(rad: float) -> float:
+    """Radians to C angle units (4096 per turn)."""
+    return rad * ONE / math.tau
 
 
 def vec3_add(a, b):
@@ -93,7 +99,7 @@ def vec3_dot(a, b):
 
 
 def vec3_length(a):
-    return int(_math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]))
+    return int(math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]))
 
 
 def vec3_scale(a, s):
@@ -102,6 +108,7 @@ def vec3_scale(a, s):
 
 class Vec3:
     """Minimal integer Vec3 with ONE scaling (4096 = 1.0)."""
+
     __slots__ = ("x", "y", "z")
 
     def __init__(self, x=0, y=0, z=0):
@@ -124,18 +131,10 @@ class Vec3:
         return self.x * o.x + self.y * o.y + self.z * o.z
 
     def length(self):
-        import math as m
-        return int(m.sqrt(self.x * self.x + self.y * self.y + self.z * self.z))
+        return int(math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z))
 
     def to_float(self):
         return (self.x / ONE, self.y / ONE, self.z / ONE)
 
     def __repr__(self):
         return f"Vec3({self.x},{self.y},{self.z})"
-
-
-if __name__ == "__main__":
-    # sanity
-    print("RSIN(0)=", RSIN(0), "RCOS(0)=", RCOS(0))
-    print("FIXEDH(4096*1.5)=", FIXEDH(int(4096 * 1.5)))
-    print("FIXED(4096*1.5)=", FIXED(int(4096 * 1.5)))
