@@ -2,7 +2,8 @@
 
 ``chunk_mesh`` is pure numpy (tested without Panda); ``ChunkStreamer`` turns
 meshes into Panda3D GeomNodes, building the nearest missing chunks first and
-dropping chunks that fall out of range.  Chunk (i, k) covers physics x in
+dropping chunks that fall out of range.  A ground with a ``road_mesh(ci, ck)``
+(world.world.World) gets its road strips added to each chunk.  Chunk (i, k) covers physics x in
 [i * size, (i + 1) * size] and z in [k * size, (k + 1) * size].
 """
 
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from panda3d.core import (
+    Filename,
     Geom,
     GeomNode,
     GeomTriangles,
@@ -18,6 +20,7 @@ from panda3d.core import (
     GeomVertexData,
     GeomVertexFormat,
     InternalName,
+    PNMImage,
 )
 
 import config
@@ -44,13 +47,19 @@ class ChunkMesh:
     tris: np.ndarray     # (m, 3) vertex indices
 
 
-def terrain_colors(height, normal, amplitude):
-    """RGBA per vertex from height (m) and unit normals (..., 3)."""
-    t = np.clip(np.asarray(height) / (0.5 * amplitude), -1.0, 1.0)[..., None]
-    lo = _MID + (_LOW - _MID) * np.clip(-t, 0.0, 1.0)
-    rgb = lo + (_HIGH - _MID) * np.clip(t, 0.0, 1.0)
-    steep = np.clip((0.988 - normal[..., 1:2]) / 0.015, 0.0, 1.0)  # ~9-13 deg
-    rgb = rgb + (_STEEP - rgb) * steep
+def terrain_colors(height, normal, amplitude, ramp=None, steep_deg=11.0):
+    """RGBA per vertex from height (m above the base level) and unit normals
+    (..., 3).  ``ramp`` has low/mid/high/steep RGB (world.biomes.ColorRamp);
+    slopes blend to ``steep`` over steep_deg +- 2.2 degrees."""
+    low, mid, high, steep_rgb = ((_LOW, _MID, _HIGH, _STEEP) if ramp is None else
+                                 (np.asarray(c) for c in (ramp.low, ramp.mid, ramp.high,
+                                                          ramp.steep)))
+    t = np.clip(np.asarray(height) / (0.5 * max(amplitude, 1e-6)), -1.0, 1.0)[..., None]
+    lo = mid + (low - mid) * np.clip(-t, 0.0, 1.0)
+    rgb = lo + (high - mid) * np.clip(t, 0.0, 1.0)
+    c0, c1 = (math.cos(math.radians(steep_deg + d)) for d in (-2.2, 2.2))
+    steep = np.clip((c0 - normal[..., 1:2]) / (c0 - c1), 0.0, 1.0)
+    rgb = rgb + (steep_rgb - rgb) * steep
     alpha = np.ones(rgb.shape[:-1] + (1,))
     return np.concatenate([rgb, alpha], axis=-1)
 
@@ -71,6 +80,11 @@ def chunk_mesh(terrain, ci, ck, size=None, res=None):
     n = np.stack([-dhx, np.ones_like(h), -dhz], axis=-1)
     n /= np.linalg.norm(n, axis=-1, keepdims=True)
     pos = np.stack([x, h, z], axis=-1)
+    if hasattr(terrain, "colors"):  # biome-aware grounds paint themselves
+        color = terrain.colors(x, z, h, n)
+    else:
+        color = terrain_colors(h, n, terrain.amplitude)
+    tile = getattr(terrain, "detail_tile_m", DETAIL_TILE_M)
 
     row = res + 1
     q = (np.arange(res)[:, None] * row + np.arange(res)[None, :]).ravel()
@@ -78,8 +92,8 @@ def chunk_mesh(terrain, ci, ck, size=None, res=None):
     # (x, y = physics z, z up) frame, so the top faces survive back-face culling
     tris = np.concatenate([np.stack([q, q + 1, q + row], axis=-1),
                            np.stack([q + 1, q + row + 1, q + row], axis=-1)])
-    return ChunkMesh(pos=pos, normal=n, color=terrain_colors(h, n, terrain.amplitude),
-                     uv=np.stack([x, z], axis=-1) / DETAIL_TILE_M, tris=tris)
+    return ChunkMesh(pos=pos, normal=n, color=color,
+                     uv=np.stack([x, z], axis=-1) / tile, tris=tris)
 
 
 def chunks_around(x, z, radius, size=None):
@@ -91,8 +105,19 @@ def chunks_around(x, z, radius, size=None):
     return sorted(keys, key=lambda k: (k[0] - ci) ** 2 + (k[1] - ck) ** 2)
 
 
-def detail_texture(size=256, seed=7):
-    """Tileable grey speckle (0.72-1.0) that modulates the vertex colours."""
+def detail_texture(path=None, size=256, seed=7):
+    """Tileable grey speckle (0.72-1.0) that modulates the vertex colours:
+    the grey levels of the image at ``path`` stretched into that range, or
+    procedural noise when no path is given."""
+    if path is not None:
+        img = PNMImage(Filename.fromOsSpecific(str(path)))
+        w, h = img.getXSize(), img.getYSize()
+        grey = np.array([[img.getBright(x, y) for x in range(w)] for y in range(h)])
+        lo, hi = np.percentile(grey, [1.0, 99.0])
+        tile = np.clip((grey - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+        grey = (184.0 + 71.0 * tile).astype(np.uint8)
+        return _to_texture(np.stack([grey, grey, grey], axis=-1), "terrain_detail",
+                           repeat=True)
     u = np.linspace(0.0, 1.0, size, endpoint=False)
     gu, gv = np.meshgrid(u, u)
 
@@ -170,8 +195,15 @@ class ChunkStreamer:
                 continue
             if built >= budget:
                 break
-            node = mesh_node(chunk_mesh(self.terrain, *key), f"chunk_{key[0]}_{key[1]}")
-            self.loaded[key] = self.root.attachNewNode(node)
+            name = f"chunk_{key[0]}_{key[1]}"
+            chunk = self.root.attachNewNode(mesh_node(chunk_mesh(self.terrain, *key), name))
+            roads = (self.terrain.road_mesh(*key) if hasattr(self.terrain, "road_mesh")
+                     else None)
+            if roads is not None:
+                # just above the flattened ground, and drawn over it where
+                # the depth buffer can't tell them apart
+                chunk.attachNewNode(mesh_node(roads, name + "_roads")).setDepthOffset(1)
+            self.loaded[key] = chunk
             built += 1
         size = config.TERRAIN_CHUNK_SIZE
         ci, ck = math.floor(x / size), math.floor(z / size)

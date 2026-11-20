@@ -79,6 +79,7 @@ LIFT_FRICTION_LIMIT = tuple(dr2_velocity(v) for v in (1005, 6030, 1005, 5025, 18
 TYRE_LEVER_SCALE = np.array([1.0, 12.0 / 32.0, 1.0])
 SURFACE_ROAD = 0
 SURFACE_GRASS = 1
+SURFACE_OFFROAD = 2  # open ground off the roads; drives like the road for now
 
 
 def lateral_stiffness(speed: float) -> float:

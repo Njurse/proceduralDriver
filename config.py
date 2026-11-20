@@ -34,14 +34,29 @@ SKYBOX_PNG = (ASSETS / "world" / "landscape" / "skybox.png").as_posix()
 SKY_RADIUS_M = 250.0            # sky dome radius, inside the far plane
 DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far plane
 
+# Biomes, regions and roads (world/biomes.py, world/regions.py, world/roads.py)
+WORLD_BIOMES = ("plains", "desert")  # assets/world/definitions/<name>.json
+REGION_SCALE_M = 900.0          # wavelength of the noise that splotches the biomes
+REGION_BAND = 0.08              # blend half-width in region-noise units (~200 m)
+ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
+
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in
 # the chase view and slides back onto the car as the right stick orbits round.
 CHASE_CAM_DIST = 7.5            # metres behind the car (was 10)
 CHASE_CAM_HEIGHT = 2.0          # was 3.6
 CHASE_CAM_LOOK_AHEAD = 6.0      # was 0: aimed at the car itself
-CHASE_CAM_LOOK_HEIGHT = -0.7    # below body origin: ~11 deg down, keeps the car in frame
+CHASE_CAM_LOOK_HEIGHT = -0.45   # below body origin: keeps the car in frame
 CHASE_CAM_FOV = 60.0            # horizontal degrees (Panda default 40)
+# Rough ground / slides: the camera hangs back from the body's vertical and
+# sideways motion instead of being welded to it.  Gains are metres of camera
+# offset per m/s of body velocity; the signal is clamped to +-2 m/s so a big
+# jump or landing cannot fling the view.
+CHASE_CAM_BOB_TAU = 0.12        # seconds; smoothing of the motion signals
+CHASE_CAM_BOB = 0.08            # vertical dip per m/s of body rise/fall
+CHASE_CAM_SWAY = 0.05           # sideways lean per m/s of lateral slip
+CHASE_CAM_KICK_MAX = 2.0        # clamp on the motion signal, m/s
+CHASE_CAM_ORBIT_LOOK_RISE = 1.2 # aim point rises this much at a full side view
 
 # Wheels -------------------------------------------------------------------
 # Wheel speeds are rad/s x 100 (0.327 m tyre radius): 3300 ~ 11 m/s.
