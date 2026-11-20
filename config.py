@@ -94,6 +94,15 @@ CHASE_CAM_SWAY = 0.05           # sideways shift per m/s of slide (past the slip
 CHASE_CAM_KICK_MAX = 2.0        # clamp on the motion signal, m/s
 CHASE_CAM_ORBIT_LOOK_RISE = 1.2 # aim point rises this much at a full side view
 
+# Gamepad steering feel (core/steer_filter.py, before the physics; keys stay
+# digital).  All 0: the raw stick, as before.
+STEER_SMOOTH_S = 0.12           # time constant turning in, seconds
+STEER_RETURN_S = 0.08           # time constant back toward centre, seconds
+STEER_EXPO = 0.35               # 0 linear .. 1 cubic: softer near centre
+STEER_DEADZONE = 0.06           # stick travel ignored round the centre
+STEER_SPEED_SCALE = 0.2         # lock taken off at STEER_SPEED_REF (0.2: a fifth)
+STEER_SPEED_REF = 45.0          # m/s (162 km/h)
+
 # Wheels -------------------------------------------------------------------
 # Wheel speeds are rad/s x 100 (0.327 m tyre radius): 3300 ~ 11 m/s.
 WHEEL_FAST_TEXTURE_SPEED = 3300

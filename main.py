@@ -34,6 +34,7 @@ from core.chase_rig import ChaseRig
 from core.gamepad import Gamepad
 from core.orbit_camera import OrbitCamera
 from core.redriver2_physics import Input
+from core.steer_filter import SteerFilter, SteerParams
 from core.textures import NEAREST_PRC, use_nearest
 from core.vehicle_audio import AudioManager, sound_input
 from game.car_view import CarView
@@ -95,6 +96,10 @@ class DriveSim(Controls, ChaseCamera, CarView, TrafficDraw, ShowBase):
         # smoothed body motion the chase camera hangs back from (see config)
         self.cam_vert = 0.0
         self.cam_rig = ChaseRig(rig_params())
+        self.steer_filter = SteerFilter(SteerParams(
+            smooth_s=config.STEER_SMOOTH_S, return_s=config.STEER_RETURN_S,
+            expo=config.STEER_EXPO, deadzone=config.STEER_DEADZONE,
+            speed_scale=config.STEER_SPEED_SCALE, speed_ref=config.STEER_SPEED_REF))
 
         self.taskMgr.add(self._update, "drive-update")
 
@@ -200,6 +205,7 @@ class DriveSim(Controls, ChaseCamera, CarView, TrafficDraw, ShowBase):
         self.chunks.update(v.pos[0], v.pos[2], budget=(2 * self.chunks.radius + 1) ** 2)
         self.orbit = OrbitCamera()
         self.cam_vert = 0.0
+        self.steer_filter.reset()
         self.cam_rig.reset()
         self._sync_car(0.0)
         self._update_chase_cam(1.0 / 60.0)
@@ -264,14 +270,19 @@ class DriveSim(Controls, ChaseCamera, CarView, TrafficDraw, ShowBase):
         self._pad_menu()
         if self.paused:
             return task.cont
+        v = self.vehicle
+        analog = False
         if self.pad.connected:
             throttle = max(throttle, self.pad.right_trigger)
             brake = max(brake, self.pad.left_trigger)
-            steer = max(-1.0, min(1.0, steer + self.pad.left_x))
+            # the stick goes through the steering filter (config.STEER_*); keys
+            # stay digital, the physics ramps those itself
+            stick = self.steer_filter.update(self.pad.left_x, dt, abs(v.forward_speed))
+            steer = max(-1.0, min(1.0, steer + stick))
+            analog = abs(stick) > 1e-4
             handbrake = bool(handbrake or self.pad.a_button)
             fast = bool(fast or self.pad.right_shoulder)
 
-        v = self.vehicle
         if self.autopilot is not None:
             steer = self.autopilot(v)
         # No separate reverse gear: the C brake thrust reverses the car once
@@ -281,7 +292,7 @@ class DriveSim(Controls, ChaseCamera, CarView, TrafficDraw, ShowBase):
         inp.steer = steer
         inp.handbrake = handbrake
         inp.fast_steer = fast
-        inp.analog = self.pad.connected and abs(self.pad.left_x) > 0.0
+        inp.analog = analog
         t0 = time.perf_counter()
         self.session.step(inp, dt)
         self.chunks.update(v.pos[0], v.pos[2])
