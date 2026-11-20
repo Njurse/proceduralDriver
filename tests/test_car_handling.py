@@ -196,3 +196,17 @@ def test_full_lock_on_flat_ground_does_not_tip(speed, controls):
         assert abs(_roll_deg(v)) < 15.0
         assert v.rot[1, 1] > 0.95
     assert abs(_drift_deg(v)) > 10.0 or v.forward_speed < 15.0  # slides, scrubs speed
+
+
+def test_body_model_sits_at_the_cog():
+    """cars.c DrawCar draws the body at where + R * cog; FixCarCos shifts the
+    cog against the wheels (handling.c UpdateCarPoints)."""
+    import dataclasses
+
+    from core.car_forces import CarGeometry
+
+    cos = load_cosmetics()
+    wz = (cos.wheel_disp[0][2], cos.wheel_disp[1][2])
+    dz = float(int(-(wz[0] + wz[1] - 14) / 2))
+    geo = CarGeometry.from_cosmetics(dataclasses.replace(cos, cog=(0, -89, 6)))
+    assert geo.model_offset == pytest.approx(np.array([0.0, 89.0, dz - 6.0]) / 150.0)

@@ -103,6 +103,10 @@ class CarGeometry:
     wheel_radius: float
     power_ratio: int
     traction: int
+    # where the body model's origin sits in the physics body frame: cars.c
+    # DrawCar draws the model at where + R * cog, and the frames differ by a
+    # negation (see main.py), so this is -cog after FixCarCos.
+    model_offset: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
     @classmethod
     def from_cosmetics(cls, cos) -> "CarGeometry":
@@ -113,6 +117,8 @@ class CarGeometry:
         dz = float(int(-(wheel_disp[0, 2] + wheel_disp[1, 2] - 14) / 2))
         wheel_disp[:, 2] += dz
         c_points[:, 2] += dz
+        cog = np.array(cos.cog, dtype=float)
+        cog[2] -= dz  # handling.c UpdateCarPoints moves the cog the other way
         return cls(
             wheel_disp=wheel_disp / DR2_UNITS_PER_METRE,
             c_points=c_points / DR2_UNITS_PER_METRE,
@@ -121,6 +127,7 @@ class CarGeometry:
             wheel_radius=dr2_length(cos.wheel_size),
             power_ratio=cos.power_ratio,
             traction=cos.traction,
+            model_offset=-cog / DR2_UNITS_PER_METRE,
         )
 
 

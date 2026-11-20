@@ -78,6 +78,15 @@ def _mat4(a, t=(0.0, 0.0, 0.0)):
                 t[0], t[1], t[2], 1.0)
 
 
+class _NoPad:
+    """Stand-in Gamepad that is never connected."""
+
+    connected = False
+
+    def poll(self):
+        pass
+
+
 def _model_unit_scale(model, name):
     """Metres per model unit: 1, or 1/150 for an OBJ still in Driver 2 units.
 
@@ -149,7 +158,10 @@ class DriveSim(ShowBase):
         self.physics = PhysicsWorld()
         self.physics.add(self.vehicle)
         self.input = Input()
-        self.pad = Gamepad()
+        offscreen = options.get("window_type") == "offscreen"
+        # XInput reads the controller whether or not the window has focus, so
+        # offscreen runs ignore it: a held trigger made --shots runs differ.
+        self.pad = _NoPad() if offscreen else Gamepad()
         self.reverse = False
         self._exited = False
         self.orbit = OrbitCamera()
@@ -238,6 +250,7 @@ class DriveSim(ShowBase):
         # scale maps it in.  Both origins are the car's centre of gravity.
         self.car_body = self.render.attachNewNode("car_body")
         self.car.setScale(-_model_unit_scale(self.car, rel))
+        self.car.setPos(*self.vehicle.geo.model_offset)
         # The OBJ faces are wound for Driver 2's y-down screen space, so cull
         # the other side.
         self.car.setAttrib(CullFaceAttrib.makeReverse())

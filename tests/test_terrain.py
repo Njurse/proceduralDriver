@@ -155,7 +155,9 @@ def test_car_drives_over_the_hills_without_falling_through(terrain, heading):
         steer = 1.0 if phase == 0 else (-1.0 if phase == 4 else 0.0)
         v.process_input(_inp(steer=steer, throttle=1.0))
         world.step(DT)
-        clearance = v.pos[1] - terrain.height(v.pos[0], v.pos[2])
-        assert clearance > 0.3, f"body {clearance:.2f} m above the ground at tick {f}"
+        for corner in v.geo.c_points[:4]:  # the body's bottom corners
+            x, y, z = v.pos + v.rot @ corner
+            depth = terrain.height(x, z) - y
+            assert depth < 0.15, f"body corner {depth:.2f} m under the ground at tick {f}"
         assert v.rot[1, 1] > 0.5, f"car on its side at tick {f}"
     assert np.linalg.norm((v.pos - start)[[0, 2]]) > 300.0
