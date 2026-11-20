@@ -289,6 +289,13 @@ engine_speed_factor = rpm_proxy_norm * engine_load
 - Hysteresis: `IDLE_ENTER_SPEED < IDLE_EXIT_SPEED` to avoid flicker.
 
 ### 5.6 Skid loop behavior
+- **As built** (`core/vehicle_audio.skid_slip`, `core/engine_sound.py`, after handling.c
+  `CheckCarEffects`, which screeches only on rear-axle slide or wheelspin with a rear wheel
+  down): slip = sideways/spin slip of grounded rear tyres, or slip of grounded locked tyres
+  (handbrake, braking lockup); zero below `SKID_SPEED_MIN` (3 m/s) unless the rears spin.
+  On above `SKID_SLIP_ON` (2.0 m/s), off below `SKID_SLIP_OFF` (1.4 m/s); volume
+  `SKID_GAIN * clamp((slip - OFF) / (FULL - OFF), SKID_LEVEL_MIN, 1)`.  Tests: `tests/test_skid.py`.
+  The plan below is the original sketch.
 - **Trigger conditions** (any one qualifies):
   - `abs(lateral_slip) > SKID_SLIP_THRESHOLD` (default: 0.4, provisional; see TODO §5.8)
   - `wheelspin == 1` and `throttle > 0.3` (throttle wheelspin)

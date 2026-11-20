@@ -29,12 +29,16 @@ python main.py --shots screenshots      # save camera test shots (offscreen)
 ## Layout
 
 ```
-main.py          entry point: Panda3D scene, input, chase camera, HUD
+main.py          entry point: DriveSim (window, world, HUD, audio, frame loop), CLI
+game/            DriveSim mixins: car_view.py (car model, wheels, pose sync),
+                 chase_camera.py, controls.py (keys, gamepad, menu nav), shots.py (--shots)
 config.py        paths and tuning (terrain, camera, gearbox, audio)
 world/           ground.py: the Ground protocol the physics queries;
-                 terrain.py: seeded Perlin fBm height/normal; chunks.py: chunk meshes
+                 terrain.py: seeded Perlin fBm height/normal; chunks.py: chunk meshes;
+                 regions/biomes, roads/ (layout, road, mesh), session, save, sky, worldmap
 core/            physics (redriver2_physics, car_forces, engine, fixedpoint, quat),
-                 audio (engine_sound, vehicle_audio), camera, gamepad, textures
+                 audio (engine_sound, vehicle_audio), camera, gamepad + xinput, textures
+ui/              pause menu, minimap
 tests/           pytest suite, including a golden trajectory
 tools/           dr2_fixed_emu.py: integer emulator of the C handling
 assets/          Havana car model, wheels, handling.json and sounds
