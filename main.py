@@ -36,6 +36,7 @@ from panda3d.core import (
     Mat4,
     MaterialAttrib,
     NodePath,
+    Point3,
     TextNode,
     TextureAttrib,
     TransparencyAttrib,
@@ -55,7 +56,7 @@ from core.units import DR2_UNITS_PER_METRE
 from core.vehicle_audio import AudioManager, sound_input
 from world.chunks import ChunkStreamer, detail_texture
 from world.sky import build_sky
-from world.terrain import Terrain
+from world.world import World
 
 log = logging.getLogger("main")
 
@@ -173,8 +174,9 @@ class DriveSim(ShowBase):
 
         self.cos = load_cosmetics()
         self.vehicle = Vehicle(self.cos)
-        self.terrain = Terrain()
-        self.vehicle.reset(ground=self.terrain)
+        self.terrain = World()   # biome regions with roads (world/world.py)
+        x, z, heading = self.terrain.spawn()
+        self.vehicle.reset(x, z, heading, ground=self.terrain)
         self.physics = PhysicsWorld()
         self.physics.add(self.vehicle)
         self.input = Input()
@@ -186,6 +188,7 @@ class DriveSim(ShowBase):
         self._exited = False
         self.orbit = OrbitCamera()
         self.cam_override = options.get("cam_heading")  # radians, fixed orbit
+        self.autopilot = None  # f(vehicle) -> steer, replaces the keys (--shots)
         if options.get("window_type") == "offscreen":
             # fixed 60 Hz steps so offscreen runs and screenshots repeat
             self.clock.setMode(ClockObject.MNonRealTime)
@@ -200,6 +203,9 @@ class DriveSim(ShowBase):
 
         self.audio = AudioManager(self.cos)
         self.spin = 0.0
+        # smoothed body motion the chase camera hangs back from (see config)
+        self.cam_vert = 0.0
+        self.cam_side = 0.0
 
         self.taskMgr.add(self._update, "drive-update")
 
@@ -218,7 +224,8 @@ class DriveSim(ShowBase):
     def _build_world(self):
         # Endless terrain: chunk meshes streamed round the car (world/chunks.py),
         # vertex-coloured by height and slope over a tiled detail texture.
-        self.chunks = ChunkStreamer(self.terrain, self.render, detail_texture())
+        self.chunks = ChunkStreamer(self.terrain, self.render,
+                                    detail_texture(self.terrain.detail_texture))
         v = self.vehicle
         self.chunks.update(v.pos[0], v.pos[2], budget=(2 * self.chunks.radius + 1) ** 2)
 
@@ -448,6 +455,8 @@ class DriveSim(ShowBase):
             fast = bool(fast or self.pad.right_shoulder)
 
         v = self.vehicle
+        if self.autopilot is not None:
+            steer = self.autopilot(v)
         # No separate reverse gear: the C brake thrust reverses the car once
         # it is nearly stopped (ProcessCarPad).
         inp.throttle = throttle
@@ -494,17 +503,31 @@ class DriveSim(ShowBase):
         v = self.vehicle
         h = v.heading
         angle = self._orbit_angle(dt)
-        ox, oy, oz = orbit_offset(angle, config.CHASE_CAM_DIST, config.CHASE_CAM_HEIGHT)
         # car yaw frame -> physics world: right (cos h, 0, -sin h), fwd (sin h, 0, cos h)
-        offset = np.array([ox * math.cos(h) + oz * math.sin(h), oy,
-                           -ox * math.sin(h) + oz * math.cos(h)])
+        right = np.array([math.cos(h), 0.0, -math.sin(h)])
+        fwd = np.array([math.sin(h), 0.0, math.cos(h)])
+        ox, oy, oz = orbit_offset(angle, config.CHASE_CAM_DIST, config.CHASE_CAM_HEIGHT)
+        offset = right * ox + fwd * oz
+        offset[1] = oy
+        # Rough ground and slides: the camera hangs back from the body's
+        # vertical and sideways motion instead of being welded to it, so
+        # bumps bob the view and drifts sway it.  First-order and clamped.
+        k = 1.0 - math.exp(-dt / config.CHASE_CAM_BOB_TAU)
+        kick = config.CHASE_CAM_KICK_MAX
+        self.cam_vert += (v.vel[1] - self.cam_vert) * k
+        self.cam_side += (float(v.vel @ right) - self.cam_side) * k
+        offset[1] -= max(-kick, min(kick, self.cam_vert)) * config.CHASE_CAM_BOB
+        offset -= right * (max(-kick, min(kick, self.cam_side)) * config.CHASE_CAM_SWAY)
         eye = v.pos + offset
         eye[1] = max(eye[1], self.terrain.height(eye[0], eye[2]) + CAM_TERRAIN_CLEARANCE)
         self.camera.setPos(*(PHYS_TO_PANDA @ eye))
-        # aim ahead of the car in the chase view, at the car from the side/front
+        # Aim ahead of the car in the chase view, at the car from the
+        # side/front; panning sideways lifts the aim point so the view opens
+        # up past the car instead of staring at the roof.
         ahead = config.CHASE_CAM_LOOK_AHEAD * max(0.0, math.cos(angle))
-        aim = v.pos + np.array([math.sin(h) * ahead, config.CHASE_CAM_LOOK_HEIGHT,
-                                math.cos(h) * ahead])
+        look_h = (config.CHASE_CAM_LOOK_HEIGHT
+                  + config.CHASE_CAM_ORBIT_LOOK_RISE * abs(math.sin(angle)))
+        aim = v.pos + fwd * ahead + np.array([0.0, look_h, 0.0])
         self.camera.lookAt(*(PHYS_TO_PANDA @ aim))
 
     def _update_hud(self):
@@ -544,13 +567,19 @@ def take_shots(game, out_dir):
             game.taskMgr.step()
 
     game.key_throttle = True
-    run(150)  # 2.5 s of gas, ~80 km/h
+    t = game.terrain
+    game.autopilot = lambda v: t.road_steer(v.pos[0], v.pos[2], v.heading)
+    run(150)  # 2.5 s of gas down the road, ~80 km/h
+    _save_shot(game, os.path.join(out_dir, "road_chase.png"))
+    sky_chase(game)
+    _save_shot(game, os.path.join(out_dir, "sky_chase.png"))
     for name, deg in SHOTS:
         game.cam_override = math.radians(deg)
         run(3)
         _save_shot(game, os.path.join(out_dir, f"{name}.png"))
     game.cam_override = None
     game.orbit = OrbitCamera()
+    game.autopilot = None
     game.key_right = True
     run(40)
     _save_shot(game, os.path.join(out_dir, "world_corner_chase.png"))
@@ -574,6 +603,56 @@ def take_shots(game, out_dir):
     game.camera.setPos(wheel + right * 1.3 + ahead * 0.9 + up * 0.25)
     game.camera.lookAt(wheel)
     _save_shot(game, os.path.join(out_dir, "world_wheel_closeup.png"))
+
+    biome_border(game)
+    _save_shot(game, os.path.join(out_dir, "biome_border.png"))
+    overhead(game)
+    _save_shot(game, os.path.join(out_dir, "roads_overview.png"))
+
+
+def sky_chase(game):
+    """Camera low behind the car, tilted up at the sky."""
+    v = game.vehicle
+    fwd = np.array([math.sin(v.heading), 0.0, math.cos(v.heading)])
+    up = np.array([0.0, 1.0, 0.0])
+    game.camera.setPos(*(PHYS_TO_PANDA @ (v.pos - fwd * 7.0 + up * 1.4)))
+    game.camera.lookAt(*(PHYS_TO_PANDA @ (v.pos + fwd * 30.0 + up * 9.0)))
+
+
+def biome_border(game, max_radius=600.0):
+    """Camera up high, looking along the biome border nearest the car."""
+    world, v = game.terrain, game.vehicle
+    best = None
+    for r in np.arange(40.0, max_radius, 20.0):
+        a = np.linspace(0.0, 2.0 * math.pi, int(r / 4), endpoint=False)
+        x, z = v.pos[0] + r * np.sin(a), v.pos[2] + r * np.cos(a)
+        k = int(np.argmin(np.abs(world.biome_weight(x, z) - 0.5)))
+        if abs(world.biome_weight(x[k], z[k]) - 0.5) < 0.05:
+            best = np.array([x[k], world.height(x[k], z[k]), z[k]])
+            break
+    if best is None:
+        log.warning("[shots] no biome border within %.0f m", max_radius)
+        best = v.pos.copy()
+    _, wx, wz = world.regions.weight(best[0], best[2])
+    across = np.array([wx, 0.0, wz]) / max(math.hypot(wx, wz), 1e-9)
+    along = np.array([-across[2], 0.0, across[0]])
+    eye = best - along * 150.0 + np.array([0.0, 45.0, 0.0])
+    game.chunks.update(best[0], best[2], budget=(2 * game.chunks.radius + 1) ** 2)
+    game.camera.setPos(*(PHYS_TO_PANDA @ eye))
+    game.camera.lookAt(*(PHYS_TO_PANDA @ (best + along * 40.0)))
+    game.fog.setExpDensity(config.DRIVE_FOG_DENSITY * 0.3)
+
+
+def overhead(game, height=750.0, radius=9):
+    """Look straight down on the roads round the car: far plane out, fog
+    off and a wider ring of chunks for this one frame."""
+    v = game.vehicle
+    game.camLens.setNearFar(CAMERA_NEAR_M, height + 200.0)
+    game.fog.setExpDensity(0.0)
+    game.chunks.radius = radius
+    game.chunks.update(v.pos[0], v.pos[2], budget=(2 * radius + 1) ** 2)
+    game.camera.setPos(*(PHYS_TO_PANDA @ (v.pos + np.array([0.0, height, 0.0]))))
+    game.camera.lookAt(Point3(*(PHYS_TO_PANDA @ v.pos)), Vec3(0, 1, 0))
 
 
 def main():
