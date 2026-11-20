@@ -16,6 +16,7 @@ from worldgen.chunk import ChunkMesh
 from worldgen.ground import SURFACE_OFFROAD, SURFACE_ROAD, SampledGround
 from worldgen.regions import Regions
 from worldgen.roads import RoadNetwork
+from worldgen.structures import Structures, structures_mesh
 
 
 class WorldGround(SampledGround):
@@ -25,6 +26,7 @@ class WorldGround(SampledGround):
         self.roads = RoadNetwork(spec, self.regions)
         self.biomes = self.regions.biomes
         self.detail_tile_m = self.biomes[0].terrain.detail_tile_m   # uv scale of every chunk
+        self.structures = Structures(self)
 
     def query(self, x, z):
         """(height, dh/dx, dh/dz, on_road) for scalars or arrays."""
@@ -76,3 +78,7 @@ class WorldGround(SampledGround):
         pos, normal, color, uv, tris = out
         return ChunkMesh(pos=pos, normal=normal, color=color,
                          uv=uv / self.spec.roads.detail_tile_m, tris=tris)
+
+    def structure_mesh(self, ci, ck):
+        """The structures anchored in chunk (ci, ck) as one ChunkMesh, or None."""
+        return structures_mesh(self.structures.chunk(ci, ck))

@@ -36,5 +36,9 @@
     "loop_odds": 0.5,
     "l_corner_odds": 0.2,
     "corner_radius_m": 20.0
-  }
+  },
+  "structures": [
+    {"gen": "cottages"},
+    {"gen": "scatter", "kinds": ["tree", "shrub"], "odds": 0.12}
+  ]
 }

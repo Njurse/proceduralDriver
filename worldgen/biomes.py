@@ -86,6 +86,7 @@ class Biome:
     weight: float = 1.0              # relative odds of the biome per region
     region_size: int = 1             # regions span this many sites each way
     encroach: float = 0.0            # 0..1: how far its regions push into neighbours
+    structures: tuple = ()           # worldgen.structures rules: {"gen": name, ...}
 
 
 _LIMITS = {
@@ -198,10 +199,17 @@ def parse_biome(data, where="biome", default_name="biome", assets_dir=None):
     weight = _value(where, "weight", data.get("weight", 1.0), 1.0)
     size = _value(where, "region_size", data.get("region_size", 1), 1)
     encroach = _value(where, "encroach", data.get("encroach", 0.0), 0.0)
+    rules = data.get("structures", [])
+    if not (isinstance(rules, list) and all(isinstance(r, dict) and isinstance(
+            r.get("gen"), str) for r in rules)):
+        raise ValueError(f"{where}.structures: expected a list of objects with a "
+                         f"\"gen\" name, got {rules!r}")
     extra = {k: v for k, v in data.items()
-             if k not in ("name", "terrain", "roads", "weight", "region_size", "encroach")}
+             if k not in ("name", "terrain", "roads", "weight", "region_size", "encroach",
+                          "structures")}
     return Biome(name=name, terrain=terrain, roads=roads, extra=extra, weight=weight,
-                 region_size=size, encroach=encroach)
+                 region_size=size, encroach=encroach,
+                 structures=tuple(dict(r) for r in rules))
 
 
 def load_biome(name, definitions_dir, assets_dir=None):

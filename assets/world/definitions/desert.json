@@ -30,5 +30,8 @@
     "surface": "packed_sand",
     "color": [0.56, 0.47, 0.35],
     "flatten": true
-  }
+  },
+  "structures": [
+    {"gen": "scatter", "kinds": ["rock", "rock", "cactus", "pole"], "spacing_m": 26.0, "odds": 0.22, "max_slope_deg": 18.0}
+  ]
 }
