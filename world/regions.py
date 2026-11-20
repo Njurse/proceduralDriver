@@ -89,6 +89,7 @@ class Regions(SampledGround):
         self.detail_texture = (config.ASSETS / first.detail_texture).as_posix()
         self.detail_tile_m = first.detail_tile_m
         self._cells = {}
+        self._last_weights = None
         r = np.arange(-_REACH, _REACH + 1)
         self._offsets = np.stack(np.meshgrid(r, r), axis=-1).reshape(-1, 2)
 
@@ -149,37 +150,45 @@ class Regions(SampledGround):
         return out
 
     def weights(self, x, z):
-        """(W, dW/dx, dW/dz), each (n, n_biomes), for 1-D point arrays."""
+        """(W, dW/dx, dW/dz), each (n, n_biomes), for 1-D point arrays.  The
+        last answer is kept: a chunk asks for its heights, then its colours."""
         x, z = np.atleast_1d(np.asarray(x, float)), np.atleast_1d(np.asarray(z, float))
+        last = self._last_weights
+        if last is not None and np.array_equal(last[0], x) and np.array_equal(last[1], z):
+            return last[2]
         n, nb = len(x), len(self.biomes)
         w, wx, wz = np.zeros((n, nb)), np.zeros((n, nb)), np.zeros((n, nb))
         ci = np.floor(x / self.scale_m).astype(np.int64)
         cj = np.floor(z / self.scale_m).astype(np.int64)
-        cells = np.stack([ci, cj], axis=1)
-        for cell in np.unique(cells, axis=0):
-            m = np.nonzero((ci == cell[0]) & (cj == cell[1]))[0]
-            pos, owner, _ = self._sites(int(cell[0]), int(cell[1]))
+        if ci.min() == ci.max() and cj.min() == cj.max():
+            groups = [(int(ci[0]), int(cj[0]), slice(None))]       # one cell: the usual case
+        else:
+            cells, inv = np.unique(np.stack([ci, cj], axis=1), axis=0, return_inverse=True)
+            inv = inv.ravel()
+            groups = [(int(c[0]), int(c[1]), np.nonzero(inv == g)[0])
+                      for g, c in enumerate(cells)]
+        for gi, gj, m in groups:
+            pos, owner, _ = self._sites(gi, gj)
             px = x[m, None] - pos[None, :, 0]
             pz = z[m, None] - pos[None, :, 1]
             d = np.hypot(px, pz)
-            inv = 1.0 / np.maximum(d, 1e-9)
-            gx, gz = px * inv, pz * inv
+            inv_d = 1.0 / np.maximum(d, 1e-9)
+            gx, gz = px * inv_d, pz * inv_d
             k = np.argmin(d, axis=1)
-            r = np.arange(len(m))
+            r = np.arange(len(d))
             t = np.clip((d - d[r, k][:, None]) / self.band_m, 0.0, 1.0)
             f = 1.0 - t * t * (3.0 - 2.0 * t)
             df = -6.0 * t * (1.0 - t) / self.band_m
             fx = df * (gx - gx[r, k][:, None])
             fz = df * (gz - gz[r, k][:, None])
-            for b in np.unique(owner):
-                cols = owner == b
-                w[m, b] = f[:, cols].sum(axis=1)
-                wx[m, b] = fx[:, cols].sum(axis=1)
-                wz[m, b] = fz[:, cols].sum(axis=1)
+            onehot = (owner[:, None] == np.arange(nb)[None, :]).astype(float)   # site -> biome
+            w[m], wx[m], wz[m] = f @ onehot, fx @ onehot, fz @ onehot
         total = w.sum(axis=1, keepdims=True)
         tx, tz = wx.sum(axis=1, keepdims=True), wz.sum(axis=1, keepdims=True)
         wn = w / total
-        return wn, (wx - wn * tx) / total, (wz - wn * tz) / total
+        out = wn, (wx - wn * tx) / total, (wz - wn * tz) / total
+        self._last_weights = (x.copy(), z.copy(), out)
+        return out
 
     def site_mean(self, x, z, values):
         """Per point, the mean of per-site ``values(pos (k, 2), biome (k,))``
