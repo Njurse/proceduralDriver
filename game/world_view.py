@@ -158,6 +158,7 @@ class ChunkStreamer:
         has_roads = hasattr(self.terrain, "road_mesh")
         has_structures = hasattr(self.terrain, "structure_mesh")
         built, left = 0, False
+        heavy = None     # per frame: a ground mesh or structures, never both (spikes)
         for key in chunks_around(x, z, self.radius, self.spec.chunk_size_m):
             fresh = key not in self.loaded
             if not fresh and key not in self._roadless and key not in self._bare:
@@ -165,8 +166,12 @@ class ChunkStreamer:
             if built >= budget or time.perf_counter() >= stop:
                 left = True
                 break
+            if per_frame and heavy == "structures" and fresh:
+                left = True
+                continue
             t0 = time.perf_counter()
             if fresh:
+                heavy = "ground"
                 name = f"chunk_{key[0]}_{key[1]}"
                 self.loaded[key] = self.root.attachNewNode(
                     mesh_node(chunk_mesh(self.terrain, *key, self.spec), name))
@@ -180,9 +185,10 @@ class ChunkStreamer:
                 self._roadless.discard(key)
                 self._add_roads(key)
                 more = not per_frame
-            if more and key in self._bare:
+            if more and key in self._bare and not (per_frame and heavy == "ground"):
                 self._bare.discard(key)
                 self._add_structures(key)
+                heavy = "structures"
             built += 1
             self._batch[1] += (time.perf_counter() - t0) * 1000.0
         size = self.spec.chunk_size_m
