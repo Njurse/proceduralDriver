@@ -1,0 +1,32 @@
+{
+  "name": "plains",
+  "description": "Open green farmland: low rolling hills under a dense grid of tarmac roads.",
+  "terrain": {
+    "noise_scale_m": 140.0,
+    "amplitude_m": 10.0,
+    "octaves": 4,
+    "persistence": 0.3,
+    "lacunarity": 2.0,
+    "base_height_m": 0.0,
+    "steep_slope_deg": 11.0,
+    "colors": {
+      "low": [0.14, 0.28, 0.10],
+      "mid": [0.32, 0.47, 0.19],
+      "high": [0.66, 0.60, 0.33],
+      "steep": [0.48, 0.38, 0.25]
+    },
+    "detail_texture": "world/landscape/ground_texture_noise.png",
+    "detail_tile_m": 8.0
+  },
+  "roads": {
+    "grid_spacing_m": 200.0,
+    "jitter_m": 25.0,
+    "curviness_m": 40.0,
+    "width_m": 16.0,
+    "shoulder_m": 10.0,
+    "max_grade_pct": 7.0,
+    "surface": "asphalt",
+    "color": [0.30, 0.30, 0.32],
+    "flatten": true
+  }
+}

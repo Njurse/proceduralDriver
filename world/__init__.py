@@ -1,1 +1,1 @@
-"""Procedural world generation: galaxy, systems, planets and terrain."""
+"""The drivable world: the Ground protocol and the procedural terrain."""

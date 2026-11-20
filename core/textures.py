@@ -5,11 +5,9 @@ bottom-up, so :func:`_to_texture` swizzles and flips every array once.
 """
 
 import numpy as np
-from panda3d.core import Texture
+from panda3d.core import Filename, PNMImage, Texture
 
 from core.noise import fbm_2d
-
-_STOPS = (0.00, 0.30, 0.44, 0.60, 0.78, 0.92)
 
 
 def _normalise_rgba(rgba):
@@ -32,7 +30,18 @@ def upload_rgba(texture, rgba):
     texture.setRamImage(np.ascontiguousarray(np.flipud(data)).tobytes())
 
 
-def _to_texture(rgba, name, repeat=False, linear=True):
+# Every surface uses nearest ("closest") filtering for the PlayStation look.
+NEAREST_PRC = "texture-minfilter nearest\ntexture-magfilter nearest\n"
+
+
+def use_nearest(texture):
+    """Set nearest filtering, no mipmaps, on a texture or text font."""
+    texture.setMinfilter(Texture.FT_nearest)
+    texture.setMagfilter(Texture.FT_nearest)
+    return texture
+
+
+def _to_texture(rgba, name, repeat=False):
     """Create a Panda3D texture from an ``(h, w, 3|4)`` uint8 array."""
     arr = _normalise_rgba(rgba)
     height, width = arr.shape[:2]
@@ -40,8 +49,7 @@ def _to_texture(rgba, name, repeat=False, linear=True):
     texture.setup2dTexture(width, height, Texture.T_unsigned_byte,
                            Texture.F_rgba8)
     upload_rgba(texture, arr)
-    texture.setMagfilter(Texture.FT_linear if linear else Texture.FT_nearest)
-    texture.setMinfilter(Texture.FT_linear if linear else Texture.FT_nearest)
+    use_nearest(texture)
     if repeat:
         texture.setWrapU(Texture.WMRepeat)
         texture.setWrapV(Texture.WMRepeat)
@@ -59,71 +67,17 @@ def seamless_fbm(width, height, frequency, seed, octaves=5):
     return left * (1.0 - grid_u) + right * grid_u
 
 
-def _ramp(value, stops, colors):
-    out = np.zeros(value.shape + (3,), dtype=np.float64)
-    for channel in range(3):
-        channel_stops = [color[channel] for color in colors]
-        out[..., channel] = np.interp(value, stops, channel_stops)
-    return out
+def load_color_keyed(path, name, key=(255, 255, 255)):
+    """Load an image as a texture, making ``key``-coloured pixels transparent.
 
-
-def planet_texture(width, height, palette, seed, frozen_caps=0.6):
-    """Rocky planet surface map tinted by an archetype palette."""
-    elevation = seamless_fbm(width, height, 5.0, seed, 5)
-    detail = seamless_fbm(width, height, 17.0, seed + 71, 3)
-    continents = seamless_fbm(width, height, 2.2, seed + 13, 3)
-    elevated = elevation * 0.62 + detail * 0.18 + continents * 0.20
-
-    colors = [palette["deep"], palette["water"], palette["low"],
-              palette["mid"], palette["high"], palette["peak"]]
-    rgb = _ramp(np.clip(elevated, 0.0, 1.0), _STOPS, colors)
-
-    # Darken steep/detailed areas slightly for extra surface variation.
-    rgb *= (0.86 + 0.28 * detail)[..., None]
-
-    # Polar caps fade in toward the poles.
-    v = np.linspace(0.0, 1.0, height)[:, None]
-    latitude = np.abs(v * 2.0 - 1.0)
-    cap = np.clip((latitude - (1.0 - frozen_caps)) / max(frozen_caps, 1e-3),
-                  0.0, 1.0)
-    cap = cap * cap * (3.0 - 2.0 * cap)
-    snow = np.asarray(palette["peak"], dtype=np.float64)
-    rgb = rgb * (1.0 - cap[..., None]) + snow * cap[..., None]
-
-    rgba = np.empty((height, width, 4), dtype=np.uint8)
-    rgba[..., :3] = np.clip(rgb * 255.0, 0, 255)
-    rgba[..., 3] = 255
-    return _to_texture(rgba, f"planet_{seed}", repeat=False)
-
-
-def cloud_texture(width, height, seed, coverage, color):
-    """Soft alpha cloud map; use with a transparent sphere shell."""
-    noise = seamless_fbm(width, height, 9.0, seed + 991, 5)
-    curve = seamless_fbm(width, height, 3.0, seed + 331, 3)
-    pattern = noise * 0.68 + curve * 0.32
-    threshold = 1.0 - coverage
-    alpha = np.clip((pattern - threshold) / 0.22, 0.0, 1.0)
-    alpha = alpha * alpha * (3.0 - 2.0 * alpha)
-    alpha *= 0.92
-
-    rgba = np.empty((height, width, 4), dtype=np.uint8)
-    shade = 0.82 + 0.18 * noise
-    rgba[..., 0] = np.clip(color[0] * shade * 255.0, 0, 255)
-    rgba[..., 1] = np.clip(color[1] * shade * 255.0, 0, 255)
-    rgba[..., 2] = np.clip(color[2] * shade * 255.0, 0, 255)
-    rgba[..., 3] = np.clip(alpha * 255.0, 0, 255)
-    return _to_texture(rgba, f"cloud_{seed}", repeat=True)
-
-
-def soft_dot_texture(size=64, color=(1.0, 1.0, 1.0), falloff=2.4):
-    """Radial alpha sprite used for map markers and glows."""
-    axis = np.linspace(-1.0, 1.0, size)
-    x, y = np.meshgrid(axis, axis)
-    radius = np.clip(np.sqrt(x * x + y * y), 0.0, 1.0)
-    alpha = np.power(1.0 - radius, falloff)
-    rgba = np.empty((size, size, 4), dtype=np.uint8)
-    rgba[..., 0] = int(color[0] * 255)
-    rgba[..., 1] = int(color[1] * 255)
-    rgba[..., 2] = int(color[2] * 255)
-    rgba[..., 3] = np.clip(alpha * 255.0, 0, 255)
-    return _to_texture(rgba, "soft_dot", repeat=False)
+    The Driver 2 wheel PNGs have no alpha: the round wheel sits on a white
+    square that the PlayStation drew as its transparent colour.
+    """
+    img = PNMImage(Filename.fromOsSpecific(str(path)))
+    w, h = img.getXSize(), img.getYSize()
+    rgb = np.array([[img.getXelVal(x, y) for x in range(w)] for y in range(h)],
+                   dtype=np.int64)
+    rgb = rgb * 255 // max(img.getMaxval(), 1)
+    alpha = np.where(np.all(rgb == np.array(key), axis=-1), 0, 255)
+    rgba = np.concatenate([rgb, alpha[..., None]], axis=-1).astype(np.uint8)
+    return _to_texture(rgba, name)

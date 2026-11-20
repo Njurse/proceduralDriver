@@ -1,127 +1,165 @@
-"""Heightfield terrain generation, tinting, water and height sampling."""
+"""Seeded rolling hills: 2D gradient (Perlin) noise summed in fBm octaves.
+
+``Terrain`` is a world.ground.Ground.  Heights and normals are analytic (the
+noise returns its own gradient), so the physics, the chunk meshes and the
+normals all agree exactly.  Every function takes scalars (the physics path,
+plain Python for speed) or numpy arrays (the mesh path) of x/z in metres.
+"""
+
+import math
 
 import numpy as np
-from panda3d.core import Material, TransparencyAttrib, Vec4
 
 import config
-from core.geometry import make_ground_plane, make_heightfield
-from core.noise import fbm_2d, terrain_height
+from world.ground import SampledGround
+
+_GRADIENTS = 16          # unit gradient directions, evenly spaced
+LACUNARITY = 2.0         # frequency step per octave
+PERSISTENCE = 0.30       # amplitude step per octave; higher makes small bumps
+                         # that throw the car (0.45 rolled it in 4 of 8 test runs)
+NOISE_TYPES = ("fbm", "ridged", "terraced")
+_RIDGE_SOFT = 0.08       # softening of |n| at the crests (noise units)
+_RIDGE_MEAN = 0.20       # mean of the softened |n|, so ridged stays centred on 0
 
 
-class Terrain:
-    def __init__(self, seed, archetype):
-        self.seed = seed
-        self.archetype = archetype
-        self.palette = archetype["palette"]
-        self.params = dict(archetype["terrain"])
-        self.size = config.ATMO_WORLD_SIZE
-        self.grid = config.ATMO_GRID
-        self.amplitude = float(self.params["amplitude"])
+def _fade(t):
+    """Quintic ease 6t^5 - 15t^4 + 10t^3: C2, so normals are continuous."""
+    return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 
-        coords = np.linspace(-self.size * 0.5, self.size * 0.5, self.grid)
-        self._coords = coords
-        grid_x, grid_y = np.meshgrid(coords, coords)
-        self.heights = terrain_height(grid_x, grid_y, seed, self.params)
 
-        water = self.params.get("water")
-        self.water_level = (None if water is None
-                            else self.amplitude * float(water))
-        self.mesh = None
-        self.water = None
+def _dfade(t):
+    return 30.0 * t * t * (t * (t - 2.0) + 1.0)
 
-    # -- sampling -----------------------------------------------------------
-    def height_at(self, x, y):
-        half = self.size * 0.5
-        gx = (float(x) + half) / self.size * (self.grid - 1)
-        gy = (float(y) + half) / self.size * (self.grid - 1)
-        gx = min(max(gx, 0.0), self.grid - 1.001)
-        gy = min(max(gy, 0.0), self.grid - 1.001)
-        x0 = int(gx)
-        y0 = int(gy)
-        fx = gx - x0
-        fy = gy - y0
-        x1 = min(x0 + 1, self.grid - 1)
-        y1 = min(y0 + 1, self.grid - 1)
-        h00 = self.heights[y0, x0]
-        h10 = self.heights[y0, x1]
-        h01 = self.heights[y1, x0]
-        h11 = self.heights[y1, x1]
-        top = h00 * (1.0 - fx) + h10 * fx
-        bottom = h01 * (1.0 - fx) + h11 * fx
-        return float(top * (1.0 - fy) + bottom * fy)
 
-    # -- colours ------------------------------------------------------------
-    def _colors(self):
-        heights = self.heights
-        amplitude = self.amplitude
-        water = (self.water_level if self.water_level is not None
-                 else -amplitude * 0.75)
-        normalised = np.clip((heights - water) / (amplitude * 0.9), 0.0, 1.0)
+class Terrain(SampledGround):
+    """height(x, z) = base_height + amplitude * fBm(x / scale, z / scale), in metres.
 
-        stops = (0.0, 0.26, 0.55, 0.80, 1.0)
-        keys = ("water", "low", "mid", "high", "peak")
-        rgb = np.empty(heights.shape + (3,), dtype=np.float64)
-        flat = normalised.ravel()
-        for channel in range(3):
-            values = [self.palette[key][channel] for key in keys]
-            rgb[..., channel] = np.interp(
-                flat, stops, values).reshape(heights.shape)
+    ``persistence`` is the amplitude ratio and ``lacunarity`` the frequency
+    ratio between octaves; the octave amplitudes are normalised so the field
+    stays within about +-amplitude / 2 of base_height.
 
-        grid_x, grid_y = np.meshgrid(self._coords, self._coords)
-        moisture = fbm_2d(grid_x * 0.0011 + 11.0, grid_y * 0.0011 - 7.0,
-                          self.seed + 5, 3)
-        rgb *= (0.88 + 0.24 * moisture)[..., None]
+    ``noise_type`` shapes it:
+      "fbm"       plain summed Perlin octaves (rolling hills);
+      "ridged"    each octave folded to 1 - |n| (sharp-ish crests and long
+                  valleys), with a softened |n| so normals stay continuous;
+      "terraced"  the fBm cut into ``terrace_steps`` flat shelves across the
+                  amplitude, each joined to the next by a smoothstep ramp
+                  over ``terrace_ramp`` of the step (mesas, stepped canyons).
+    Heights and gradients stay analytic for all three.
+    """
 
-        if self.water_level is not None:
-            underwater = heights < self.water_level
-            if underwater.any():
-                depth = np.clip(
-                    (self.water_level - heights) / (amplitude * 0.35),
-                    0.0, 1.0)
-                deep = np.asarray(self.palette["deep"], dtype=np.float64)
-                blended = (rgb * (1.0 - depth[..., None])
-                           + deep * depth[..., None])
-                rgb[underwater] = blended[underwater]
+    def __init__(self, seed=None, scale=None, octaves=None, amplitude=None,
+                 persistence=PERSISTENCE, lacunarity=LACUNARITY, base_height=0.0,
+                 noise_type="fbm", terrace_steps=6, terrace_ramp=0.35):
+        self.seed = config.TERRAIN_SEED if seed is None else int(seed)
+        self.scale = float(config.TERRAIN_SCALE if scale is None else scale)
+        self.octaves = int(config.TERRAIN_OCTAVES if octaves is None else octaves)
+        self.amplitude = float(config.TERRAIN_AMPLITUDE if amplitude is None else amplitude)
+        self.persistence = float(persistence)
+        self.lacunarity = float(lacunarity)
+        self.base_height = float(base_height)
+        if noise_type not in NOISE_TYPES:
+            raise ValueError(f"noise_type {noise_type!r} is not one of {', '.join(NOISE_TYPES)}")
+        self.noise_type = noise_type
+        self.terrace_step = self.amplitude / max(int(terrace_steps), 1)
+        self.terrace_ramp = float(terrace_ramp)
 
-        rgba = np.empty(heights.shape + (4,), dtype=np.float64)
-        rgba[..., :3] = np.clip(rgb, 0.0, 1.0)
-        rgba[..., 3] = 1.0
-        return rgba
+        rng = np.random.default_rng(self.seed)
+        perm = rng.permutation(256)
+        self._perm_np = np.concatenate([perm, perm]).astype(np.int64)
+        self._perm = [int(p) for p in self._perm_np]
+        angles = (np.arange(_GRADIENTS) + rng.random()) * (2.0 * math.pi / _GRADIENTS)
+        self._gx_np, self._gy_np = np.cos(angles), np.sin(angles)
+        self._gx, self._gy = self._gx_np.tolist(), self._gy_np.tolist()
+        # per-octave lattice offsets, so octaves don't all vanish at the origin
+        self._offsets = (rng.random((self.octaves, 2)) * 256.0).tolist()
+        amps = [self.persistence ** k for k in range(self.octaves)]
+        norm = self.amplitude / sum(amps)
+        self._octaves = [(self.lacunarity ** k / self.scale, a * norm, ox, oy)
+                         for k, (a, (ox, oy)) in enumerate(zip(amps, self._offsets,
+                                                               strict=True))]
 
-    # -- scene --------------------------------------------------------------
-    def build(self, parent):
-        self.mesh = make_heightfield(self.heights, self.size, self._colors(),
-                                     "terrain")
-        material = Material("terrain_material")
-        material.setDiffuse(Vec4(1.0, 1.0, 1.0, 1.0))
-        material.setAmbient(Vec4(0.52, 0.52, 0.52, 1.0))
-        material.setSpecular(Vec4(0.02, 0.02, 0.02, 1.0))
-        material.setShininess(2.0)
-        self.mesh.setMaterial(material)
-        self.mesh.reparentTo(parent)
+    # ------------------------------------------------------------------ noise
+    def _noise(self, x, y):
+        """Perlin noise and its gradient at one point: (n, dn/dx, dn/dy)."""
+        xf, yf = math.floor(x), math.floor(y)
+        fx, fy = x - xf, y - yf
+        i, j = int(xf) & 255, int(yf) & 255
+        p, gx, gy = self._perm, self._gx, self._gy
+        h00 = p[p[i] + j] & 15
+        h10 = p[p[i + 1] + j] & 15
+        h01 = p[p[i] + j + 1] & 15
+        h11 = p[p[i + 1] + j + 1] & 15
+        a = gx[h00] * fx + gy[h00] * fy
+        b = gx[h10] * (fx - 1.0) + gy[h10] * fy
+        c = gx[h01] * fx + gy[h01] * (fy - 1.0)
+        d = gx[h11] * (fx - 1.0) + gy[h11] * (fy - 1.0)
+        u, v = _fade(fx), _fade(fy)
+        du, dv = _dfade(fx), _dfade(fy)
+        k = a - b - c + d
+        n = a + u * (b - a) + v * (c - a) + u * v * k
+        uv = u * v
+        dx = (gx[h00] + u * (gx[h10] - gx[h00]) + v * (gx[h01] - gx[h00])
+              + uv * (gx[h00] - gx[h10] - gx[h01] + gx[h11]) + du * (b - a + v * k))
+        dy = (gy[h00] + u * (gy[h10] - gy[h00]) + v * (gy[h01] - gy[h00])
+              + uv * (gy[h00] - gy[h10] - gy[h01] + gy[h11]) + dv * (c - a + u * k))
+        return n, dx, dy
 
-        if self.water_level is not None:
-            water_color = self.palette["water"]
-            self.water = make_ground_plane(self.size * 1.7, 0.0, "water")
-            self.water.setPos(0.0, 0.0, self.water_level)
-            self.water.setColor(water_color[0], water_color[1],
-                                water_color[2], 0.86)
-            self.water.setTransparency(TransparencyAttrib.MAlpha)
-            self.water.setLightOff(1)
-            self.water.setMaterialOff(1)
-            self.water.setDepthWrite(False)
-            self.water.setBin("transparent", 4)
-            self.water.reparentTo(parent)
-        return self.mesh
+    def _noise_np(self, x, y):
+        """Vectorised _noise for numpy arrays."""
+        xf, yf = np.floor(x), np.floor(y)
+        fx, fy = x - xf, y - yf
+        i = xf.astype(np.int64) & 255
+        j = yf.astype(np.int64) & 255
+        p, gx, gy = self._perm_np, self._gx_np, self._gy_np
+        h00 = p[p[i] + j] & 15
+        h10 = p[p[i + 1] + j] & 15
+        h01 = p[p[i] + j + 1] & 15
+        h11 = p[p[i + 1] + j + 1] & 15
+        a = gx[h00] * fx + gy[h00] * fy
+        b = gx[h10] * (fx - 1.0) + gy[h10] * fy
+        c = gx[h01] * fx + gy[h01] * (fy - 1.0)
+        d = gx[h11] * (fx - 1.0) + gy[h11] * (fy - 1.0)
+        u, v = _fade(fx), _fade(fy)
+        du, dv = _dfade(fx), _dfade(fy)
+        k = a - b - c + d
+        n = a + u * (b - a) + v * (c - a) + u * v * k
+        uv = u * v
+        dx = (gx[h00] + u * (gx[h10] - gx[h00]) + v * (gx[h01] - gx[h00])
+              + uv * (gx[h00] - gx[h10] - gx[h01] + gx[h11]) + du * (b - a + v * k))
+        dy = (gy[h00] + u * (gy[h10] - gy[h00]) + v * (gy[h01] - gy[h00])
+              + uv * (gy[h00] - gy[h10] - gy[h01] + gy[h11]) + dv * (c - a + u * k))
+        return n, dx, dy
 
-    def entry_position(self):
-        spawn_y = -self.size * 0.08
-        ground = self.height_at(0.0, spawn_y)
-        return (0.0, spawn_y, ground + config.ATMO_ENTRY_ALTITUDE)
+    # ---------------------------------------------------------------- terrain
+    def sample(self, x, z):
+        """(height, dh/dx, dh/dz) in metres; scalars or arrays."""
+        if np.ndim(x) == 0 and np.ndim(z) == 0:
+            noise, x, z = self._noise, float(x), float(z)
+        else:
+            noise = self._noise_np
+            x, z = np.broadcast_arrays(np.asarray(x, float), np.asarray(z, float))
+        ridged = self.noise_type == "ridged"
+        h, dhx, dhz = 0.0, 0.0, 0.0
+        for freq, amp, ox, oy in self._octaves:
+            n, dx, dy = noise(x * freq + ox, z * freq + oy)
+            if ridged:
+                # 1 - |n| with |n| softened to sqrt(n^2 + e^2), centred on 0
+                s = (n * n + _RIDGE_SOFT * _RIDGE_SOFT) ** 0.5
+                k = -n / s
+                n, dx, dy = _RIDGE_MEAN - s, k * dx, k * dy
+            h = h + amp * n
+            dhx = dhx + amp * freq * dx
+            dhz = dhz + amp * freq * dy
+        if self.noise_type == "terraced":
+            h, g = _terrace(h / self.terrace_step, self.terrace_ramp)
+            h, dhx, dhz = h * self.terrace_step, dhx * g, dhz * g
+        return h + self.base_height, dhx, dhz
 
-    def destroy(self):
-        for node in (self.mesh, self.water):
-            if node is not None:
-                node.removeNode()
-        self.mesh = None
-        self.water = None
+
+def _terrace(x, ramp):
+    """Shelves: floor(x) plus a smoothstep up to the next one over the last
+    ``ramp`` of each unit.  Returns (value, d value / dx)."""
+    fl = np.floor(x)
+    v = np.clip((x - fl - (1.0 - ramp)) / ramp, 0.0, 1.0)
+    return fl + v * v * (3.0 - 2.0 * v), 6.0 * v * (1.0 - v) / ramp

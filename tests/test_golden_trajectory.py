@@ -1,81 +1,76 @@
-"""Golden-trajectory test: behavioral identity guard for the handling refactor.
+"""Golden-trajectory test: behavioral identity guard for the handling model.
 
 Runs a scripted input sequence through PhysicsWorld and compares the resulting
 position/speed/yaw/wheel_angle trajectory against a committed golden file.
-If the golden file is missing it is generated (and the test passes); re-run
-after generation to enforce equality.
+A missing golden file fails the test.  To (re)generate it after an intentional
+physics change, run with REGEN_GOLDEN=1 and commit the new file.
 """
 
 import json
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import config
-from core.car_profile import load_cosmetics
-from core.redriver2_physics import Vehicle, PhysicsWorld
-from core.track import Track
+from core.car_profile import load_cosmetics  # noqa: E402
+from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
+from core.track import Track  # noqa: E402
 
 GOLDEN_PATH = os.path.join(os.path.dirname(__file__), "golden", "trajectory.json")
 
+# Scripted 5-second scenario exercising accel, steer, brake, handbrake, coast:
+# (end time s, steer, throttle, brake, handbrake)
+SCRIPT = (
+    (1.0, 0.0, 1.0, 0.0, False),
+    (2.0, 0.6, 0.8, 0.0, False),
+    (2.5, 0.6, 0.0, 0.0, False),
+    (3.0, -0.8, 0.0, 1.0, False),
+    (3.5, -0.8, 0.0, 0.0, True),
+    (float("inf"), 0.0, 0.5, 0.0, False),
+)
+
 
 def _inputs_for_frame(i):
-    # Scripted 5-second scenario exercising accel, steer, handbrake, coast.
     t = i / 60.0
-    inp = type("I", (), {})()
-    if t < 1.0:
-        inp.steer = 0.0; inp.throttle = 1.0; inp.brake = 0.0
-    elif t < 2.0:
-        inp.steer = 0.6; inp.throttle = 0.8; inp.brake = 0.0
-    elif t < 2.5:
-        inp.steer = 0.6; inp.throttle = 0.0; inp.brake = 0.0
-    elif t < 3.0:
-        inp.steer = -0.8; inp.throttle = 0.0; inp.brake = 1.0
-    elif t < 3.5:
-        inp.steer = -0.8; inp.throttle = 0.0; inp.brake = 0.0
-        inp.handbrake = True
-    else:
-        inp.steer = 0.0; inp.throttle = 0.5; inp.brake = 0.0
-        inp.handbrake = False
-    inp.fast_steer = False
-    inp.wheelspin = False
-    inp.handbrake = getattr(inp, "handbrake", False)
-    return inp
+    for end, steer, throttle, brake, handbrake in SCRIPT:
+        if t < end:
+            return SimpleNamespace(steer=steer, throttle=throttle, brake=brake,
+                                   handbrake=handbrake, fast_steer=False, wheelspin=False)
+    raise AssertionError("unreachable")
 
 
 def run_scenario(frames=300):
-    cos = load_cosmetics()
-    v = Vehicle(cos)
+    v = Vehicle(load_cosmetics())
     v.reset(0.0, 0.0, 0.0)
     world = PhysicsWorld(Track())
     world.add(v)
     out = []
     for i in range(frames):
-        inp = _inputs_for_frame(i)
-        v.process_input(inp)
+        v.process_input(_inputs_for_frame(i))
         world.step(1.0 / 60.0)
         out.append({
             "frame": i,
-            "x": v.position.x,
-            "z": v.position.z,
+            "x": round(float(v.pos[0]), 6),
+            "y": round(float(v.pos[1]), 6),
+            "z": round(float(v.pos[2]), 6),
             "speed": round(v.speed, 6),
-            "yaw": v.orientation,
-            "wheel_angle": v.wheel_angle,
+            "heading": round(v.heading, 9),
+            "wheel_angle": round(v.wheel_angle, 9),
         })
     return out
 
 
 def test_golden_trajectory():
     traj = run_scenario()
-    os.makedirs(os.path.dirname(GOLDEN_PATH), exist_ok=True)
-    if not os.path.exists(GOLDEN_PATH):
-        with open(GOLDEN_PATH, "w") as f:
+    if os.environ.get("REGEN_GOLDEN") == "1":
+        os.makedirs(os.path.dirname(GOLDEN_PATH), exist_ok=True)
+        with open(GOLDEN_PATH, "w", newline="\n") as f:
             json.dump(traj, f, indent=1)
-        # first run generates; pass
-        return
+    assert os.path.exists(GOLDEN_PATH), (
+        f"golden file missing: {GOLDEN_PATH}; regenerate with REGEN_GOLDEN=1")
     with open(GOLDEN_PATH) as f:
         golden = json.load(f)
     assert len(golden) == len(traj), "trajectory length mismatch"
-    for g, t in zip(golden, traj):
+    for g, t in zip(golden, traj, strict=True):
         assert g == t, f"frame {g['frame']} mismatch:\n  golden={g}\n  actual={t}"

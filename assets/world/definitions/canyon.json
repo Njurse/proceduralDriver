@@ -1,0 +1,57 @@
+{
+  "name": "canyon",
+  "description": "Red rock canyon country: stepped mesas and terraced shelves banded in rust and orange, crossed by wide dirt tracks.",
+  "weight": 0.8,
+  "terrain": {
+    "noise_scale_m": 240.0,
+    "amplitude_m": 16.0,
+    "octaves": 3,
+    "persistence": 0.35,
+    "lacunarity": 2.0,
+    "base_height_m": 4.0,
+    "steep_slope_deg": 12.0,
+    "noise_type": "terraced",
+    "terrace_steps": 5,
+    "terrace_ramp": 0.6,
+    "colors": {
+      "low": [
+        0.55,
+        0.27,
+        0.16
+      ],
+      "mid": [
+        0.73,
+        0.41,
+        0.22
+      ],
+      "high": [
+        0.86,
+        0.6,
+        0.37
+      ],
+      "steep": [
+        0.47,
+        0.21,
+        0.13
+      ]
+    },
+    "detail_texture": "world/landscape/ground_texture_noise.png",
+    "detail_tile_m": 8.0
+  },
+  "roads": {
+    "grid_spacing_m": 400.0,
+    "jitter_m": 30.0,
+    "curviness_m": 40.0,
+    "width_m": 10.0,
+    "shoulder_m": 14.0,
+    "max_grade_pct": 8.0,
+    "surface": "dirt",
+    "color": [
+      0.52,
+      0.33,
+      0.24
+    ],
+    "flatten": true,
+    "markings": null
+  }
+}

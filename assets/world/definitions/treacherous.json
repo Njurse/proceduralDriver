@@ -1,0 +1,59 @@
+{
+  "name": "treacherous",
+  "description": "Highlands: big ridged mountains with snowy crests, threaded by steep, twisting mountain roads with yellow centre lines.",
+  "weight": 0.7,
+  "terrain": {
+    "noise_scale_m": 450.0,
+    "amplitude_m": 55.0,
+    "octaves": 4,
+    "persistence": 0.4,
+    "lacunarity": 2.1,
+    "base_height_m": 10.0,
+    "steep_slope_deg": 16.0,
+    "noise_type": "ridged",
+    "colors": {
+      "low": [
+        0.3,
+        0.36,
+        0.22
+      ],
+      "mid": [
+        0.46,
+        0.45,
+        0.39
+      ],
+      "high": [
+        0.92,
+        0.93,
+        0.96
+      ],
+      "steep": [
+        0.38,
+        0.35,
+        0.32
+      ]
+    },
+    "detail_texture": "world/landscape/ground_texture_noise.png",
+    "detail_tile_m": 8.0
+  },
+  "roads": {
+    "grid_spacing_m": 600.0,
+    "jitter_m": 40.0,
+    "curviness_m": 66.0,
+    "width_m": 9.0,
+    "shoulder_m": 12.0,
+    "max_grade_pct": 12.0,
+    "surface": "asphalt",
+    "color": [
+      0.22,
+      0.22,
+      0.24
+    ],
+    "flatten": true,
+    "markings": [
+      0.95,
+      0.8,
+      0.2
+    ]
+  }
+}

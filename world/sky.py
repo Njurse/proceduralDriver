@@ -1,87 +1,95 @@
-"""Atmospheric sky dome, sun disc, cloud layers and their animation."""
+"""Sky dome: the skybox panorama on an inward-facing hemisphere.
 
+assets/world/landscape/skybox.png is a single panorama strip (652x306):
+sky above, a thin tree line along the bottom rows, no ground.  Its columns
+run round the horizon and its rows from the horizon (bottom) upwards, so
+u follows the azimuth and v the elevation.  Its left and right edges match
+(mean edge difference 2.5/255, about twice the column-to-column change), so
+it wraps once round the circle.
+The top rows stretch over the upper dome (the panorama only reaches ~40 deg).
+"""
+
+import math
+
+import numpy as np
 from panda3d.core import (
-    NodePath,
-    TextureStage,
-    TransparencyAttrib,
-    Vec3,
+    CompassEffect,
+    Filename,
+    Geom,
+    GeomNode,
+    GeomTriangles,
+    GeomVertexData,
+    GeomVertexFormat,
+    GeomVertexWriter,
+    PNMImage,
+    Texture,
 )
 
-import config
-from core.geometry import make_glow_sphere, make_ground_plane, make_sky_dome
-from core.textures import cloud_texture
+from core.textures import use_nearest
+
+SEGMENTS = 48            # around the horizon
+RINGS = 16               # horizon to zenith
+BELOW_HORIZON_DEG = -6.0  # dome skirt, hidden by the ground
+TOP_DEG = 70.0           # elevation where the image's top row lands
+HORIZON_ROW = 0.035      # fraction of the image height below the tree line tops
 
 
-class Sky:
-    def __init__(self, base, palette, seed):
-        self.base = base
-        self.palette = palette
-        self.root = NodePath("sky")
-        self.time = 0.0
-        self.sun_direction = Vec3(-0.42, 0.55, 0.62)
-        self.sun_direction.normalize()
+def _v(elevation_deg):
+    """Texture v (0 = image bottom) for an elevation."""
+    t = (elevation_deg - BELOW_HORIZON_DEG) / (TOP_DEG - BELOW_HORIZON_DEG)
+    return min(1.0, HORIZON_ROW + (1.0 - HORIZON_ROW) * max(t, 0.0))
 
-        self.dome = make_sky_dome(
-            config.ATMO_SKY_RADIUS, palette["sky_top"],
-            palette["sky_horizon"], rings=22, segments=44, name="sky_dome")
-        self.dome.setLightOff(1)
-        self.dome.setFogOff(1)
-        self.dome.setDepthWrite(False)
-        self.dome.setBin("background", 10)
-        self.dome.reparentTo(self.root)
 
-        self.sun = make_glow_sphere(210.0, palette["sun"], 1.25,
-                                    "atmosphere_sun")
-        self.sun.setFogOff(1)
-        self.sun.setBin("transparent", 6)
-        self.sun.reparentTo(self.root)
+def dome_node(radius):
+    """Hemisphere of ``radius`` metres, faces wound to be seen from inside."""
+    vdata = GeomVertexData("sky", GeomVertexFormat.getV3t2(), Geom.UH_static)
+    vertex = GeomVertexWriter(vdata, "vertex")
+    uv = GeomVertexWriter(vdata, "texcoord")
+    for r in range(RINGS + 1):
+        e = BELOW_HORIZON_DEG + (90.0 - BELOW_HORIZON_DEG) * r / RINGS
+        ce, se = math.cos(math.radians(e)), math.sin(math.radians(e))
+        for s in range(SEGMENTS + 1):
+            a = 2.0 * math.pi * s / SEGMENTS
+            vertex.addData3(radius * ce * math.sin(a), radius * ce * math.cos(a), radius * se)
+            uv.addData2(s / SEGMENTS, _v(e))
+    prim = GeomTriangles(Geom.UH_static)
+    row = SEGMENTS + 1
+    for r in range(RINGS):
+        for s in range(SEGMENTS):
+            q = r * row + s
+            # counter-clockwise seen from the centre
+            prim.addVertices(q, q + 1, q + row)
+            prim.addVertices(q + 1, q + row + 1, q + row)
+    geom = Geom(vdata)
+    geom.addPrimitive(prim)
+    node = GeomNode("sky_dome")
+    node.addGeom(geom)
+    return node
 
-        self.cloud_layers = []
-        self._pending_seed = seed
 
-    def attach_clouds(self, coverage, speed):
-        if coverage <= 0.12:
-            return
-        size = config.ATMO_WORLD_SIZE * 4.0
-        for index in range(2):
-            layer_coverage = max(0.10, coverage - index * 0.10)
-            texture = cloud_texture(
-                config.CLOUD_TEXTURE_WIDTH, config.CLOUD_TEXTURE_HEIGHT,
-                self._pending_seed + index * 37, layer_coverage,
-                self.palette["cloud"])
-            plane = make_ground_plane(size, 0.0, f"cloud_{index}")
-            stage = TextureStage(f"cloud_stage_{index}")
-            plane.setTexture(stage, texture)
-            plane.setTexScale(stage, 6.0 + 3.0 * index, 6.0 + 3.0 * index)
-            plane.setTransparency(TransparencyAttrib.MAlpha)
-            plane.setColor(1.0, 1.0, 1.0, 0.70 - index * 0.16)
-            plane.setLightOff(1)
-            plane.setMaterialOff(1)
-            plane.setFogOff(1)
-            plane.setDepthWrite(False)
-            plane.setBin("transparent", 8 + index)
-            plane.setPos(0.0, 0.0, config.ATMO_CLOUD_ALTITUDE
-                         + index * 130.0)
-            plane.reparentTo(self.root)
-            self.cloud_layers.append({
-                "plane": plane,
-                "stage": stage,
-                "speed": speed * (1.0 + index * 0.35),
-                "altitude": config.ATMO_CLOUD_ALTITUDE + index * 130.0,
-            })
+def horizon_colour(img):
+    """Mean colour of the hazy band just above the tree line (for the fog)."""
+    h = img.getYSize()
+    rows = range(int(h * 0.80), int(h * 0.90))
+    cols = range(0, img.getXSize(), 4)
+    rgb = np.array([[img.getXel(x, y) for x in cols] for y in rows])
+    return tuple(float(c) for c in rgb.reshape(-1, 3).mean(axis=0))
 
-    def update(self, dt, camera_pos, ship_pos):
-        self.time += dt
-        self.dome.setPos(camera_pos)
-        self.sun.setPos(
-            camera_pos + self.sun_direction * (config.ATMO_SKY_RADIUS * 0.72))
-        for layer in self.cloud_layers:
-            plane = layer["plane"]
-            plane.setPos(ship_pos.x, ship_pos.y, layer["altitude"])
-            u = (self.time * layer["speed"] + ship_pos.x * 0.00011)
-            v = (self.time * layer["speed"] * 0.45 + ship_pos.y * 0.00011)
-            plane.setTexOffset(layer["stage"], u, v)
 
-    def destroy(self):
-        self.root.removeNode()
-        self.cloud_layers.clear()
+def build_sky(png_path, camera, render, radius):
+    """Attach the dome to ``camera`` (position only); returns (dome, horizon rgb)."""
+    img = PNMImage(Filename.fromOsSpecific(str(png_path)))
+    tex = Texture("skybox")
+    tex.load(img)
+    tex.setWrapU(Texture.WM_repeat)
+    tex.setWrapV(Texture.WM_clamp)
+    use_nearest(tex)
+    dome = camera.attachNewNode(dome_node(radius))
+    dome.setEffect(CompassEffect.make(render, CompassEffect.P_rot))  # no camera turn
+    dome.setTexture(tex, 1)
+    dome.setLightOff(1)
+    dome.setFogOff(1)
+    dome.setBin("background", 0)
+    dome.setDepthWrite(False)
+    dome.setDepthTest(False)
+    return dome, horizon_colour(img)

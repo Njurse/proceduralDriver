@@ -1,0 +1,59 @@
+{
+  "name": "village",
+  "description": "Village meadows: gentle bright-green slopes and a tidy grid of grey lanes with white dashes.",
+  "weight": 0.8,
+  "terrain": {
+    "noise_scale_m": 160.0,
+    "amplitude_m": 5.0,
+    "octaves": 3,
+    "persistence": 0.3,
+    "lacunarity": 2.0,
+    "base_height_m": 0.5,
+    "steep_slope_deg": 10.0,
+    "noise_type": "fbm",
+    "colors": {
+      "low": [
+        0.3,
+        0.42,
+        0.18
+      ],
+      "mid": [
+        0.42,
+        0.55,
+        0.24
+      ],
+      "high": [
+        0.58,
+        0.62,
+        0.32
+      ],
+      "steep": [
+        0.5,
+        0.42,
+        0.28
+      ]
+    },
+    "detail_texture": "world/landscape/ground_texture_noise.png",
+    "detail_tile_m": 8.0
+  },
+  "roads": {
+    "grid_spacing_m": 200.0,
+    "jitter_m": 15.0,
+    "curviness_m": 20.0,
+    "width_m": 10.0,
+    "shoulder_m": 8.0,
+    "max_grade_pct": 7.0,
+    "surface": "concrete",
+    "color": [
+      0.45,
+      0.43,
+      0.4
+    ],
+    "flatten": true,
+    "markings": [
+      0.92,
+      0.92,
+      0.88
+    ]
+  }
+}
