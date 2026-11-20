@@ -4,8 +4,9 @@ Run:  python main.py            (windowed)
       python main.py --offscreen --frames N
       python main.py --shots DIR    (save camera test screenshots, offscreen)
 
-Camera: right stick (or I/J/K/L) swings the camera round the car, release to
-return to the chase view; R3 (or O) latches the current angle.
+Camera: right stick (or I/J/K/L) swings the camera round the car (stick left
+looks round from the car's right, config.CHASE_CAM_FLIP_X), release to return
+to the chase view; R3 (or O) latches the current angle.
 """
 
 import argparse

@@ -27,6 +27,8 @@ class ChaseCamera:
             sx = max(-1.0, min(1.0, sx + self.pad.right_x))
             sy = max(-1.0, min(1.0, sy + self.pad.right_y))
             click = click or self.pad.right_thumb
+        if config.CHASE_CAM_FLIP_X:     # stick (and J/L) left: look round from the right
+            sx = -sx
         return self.orbit.update(dt, sx, sy, click)
 
     def _update_chase_cam(self, dt):

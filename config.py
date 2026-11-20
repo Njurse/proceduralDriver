@@ -72,6 +72,7 @@ CHASE_CAM_HEIGHT = 2.0          # was 3.6
 CHASE_CAM_LOOK_AHEAD = 6.0      # was 0: aimed at the car itself
 CHASE_CAM_LOOK_HEIGHT = -0.45   # below body origin: keeps the car in frame
 CHASE_CAM_FOV = 60.0            # horizontal degrees (Panda default 40)
+CHASE_CAM_FLIP_X = True         # right stick / J-L left looks round from the car's right
 # Rough ground / slides: the camera hangs back from the body's vertical and
 # sideways motion instead of being welded to it.  Gains are metres of camera
 # offset per m/s of body velocity; the signal is clamped to +-2 m/s so a big
