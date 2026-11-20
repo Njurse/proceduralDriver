@@ -67,12 +67,22 @@ MINIMAP_TILES_PER_FRAME = 1     # chunk tiles sampled per frame for the map
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in
 # the chase view and slides back onto the car as the right stick orbits round.
-CHASE_CAM_DIST = 7.5            # metres behind the car (was 10)
-CHASE_CAM_HEIGHT = 2.0          # was 3.6
+CHASE_CAM_DIST = 9.4            # metres behind the car at rest (was 7.5)
+CHASE_CAM_HEIGHT = 2.4          # at rest; scales with the pull-back (was 2.0)
 CHASE_CAM_LOOK_AHEAD = 6.0      # was 0: aimed at the car itself
 CHASE_CAM_LOOK_HEIGHT = -0.45   # below body origin: keeps the car in frame
-CHASE_CAM_FOV = 60.0            # horizontal degrees (Panda default 40)
+CHASE_CAM_FOV = 66.0            # horizontal degrees at rest (was 60; Panda default 40)
 CHASE_CAM_FLIP_X = True         # right stick / J-L left looks round from the car's right
+# The follow rig (core/chase_rig.py): springs and speed effects, all dt-correct.
+CHASE_CAM_YAW_LAG_S = 0.14      # spring time of the swing after the heading
+CHASE_CAM_DIST_LAG_S = 0.35     # spring time of the follow distance
+CHASE_CAM_SPEED_REF = 45.0      # m/s (162 km/h) where the speed effects are full
+CHASE_CAM_PULL_BACK = 1.8       # extra metres behind at SPEED_REF
+CHASE_CAM_FOV_GAIN = 8.0        # extra degrees of FOV at SPEED_REF
+CHASE_CAM_ACCEL_LAG = 0.12      # metres back per m/s^2 of acceleration (in under braking)
+CHASE_CAM_ACCEL_LAG_MAX = 1.2   # metres, either way
+CHASE_CAM_ROLL_GAIN = 0.35      # degrees of lean into a turn per m/s^2 sideways
+CHASE_CAM_ROLL_MAX = 3.0        # degrees
 # Rough ground / slides: the camera hangs back from the body's vertical and
 # sideways motion instead of being welded to it.  Gains are metres of camera
 # offset per m/s of body velocity; the signal is clamped to +-2 m/s so a big
