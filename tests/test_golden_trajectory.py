@@ -51,10 +51,11 @@ def run_scenario(frames=300):
         world.step(1.0 / 60.0)
         out.append({
             "frame": i,
-            "x": v.position.x,
-            "z": v.position.z,
+            "x": round(float(v.pos[0]), 6),
+            "y": round(float(v.pos[1]), 6),
+            "z": round(float(v.pos[2]), 6),
             "speed": round(v.speed, 6),
-            "yaw": v.orientation,
+            "heading": round(v.heading, 9),
             "wheel_angle": round(v.wheel_angle, 9),
         })
     return out
