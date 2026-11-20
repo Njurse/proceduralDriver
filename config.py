@@ -1,5 +1,6 @@
 """Central configuration: paths and tuning constants for the driving game."""
 
+import math
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -25,9 +26,11 @@ TERRAIN_OCTAVES = 4
 TERRAIN_AMPLITUDE = 10.0        # metres; hills reach about +-5 m, slopes under 10 deg
 TERRAIN_CHUNK_SIZE = 64.0       # metres per square chunk
 TERRAIN_CHUNK_RES = 32          # quads per chunk side (2 m spacing)
-TERRAIN_VIEW_CHUNKS = 3         # chunks kept loaded in each direction round the car
+DRAW_DISTANCE_M = 290.0         # camera far plane (was ~190 m: 3 chunks of terrain)
+# chunks kept loaded in each direction round the car: enough to reach the far plane
+TERRAIN_VIEW_CHUNKS = math.ceil(DRAW_DISTANCE_M / TERRAIN_CHUNK_SIZE)
 TERRAIN_BUILDS_PER_FRAME = 2    # chunk meshes built per frame while streaming
-DRIVE_FOG_DENSITY = 0.011       # exp-squared fog; hides the streaming edge
+DRIVE_FOG_DENSITY = 0.0073      # exp-squared fog: ~1% visibility at the far plane
 
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in

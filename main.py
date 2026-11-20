@@ -58,6 +58,7 @@ log = logging.getLogger("main")
 SHOTS = (("world_chase", 0.0), ("world_left_side", -90.0), ("world_right_side", 90.0),
          ("world_front_looking_back", 180.0))
 CAM_TERRAIN_CLEARANCE = 0.6  # keep the chase camera this far above the hills
+CAMERA_NEAR_M = 0.2          # close enough for the wheel close-up
 MAX_CAR_EXTENT_M = 20.0      # a longer model is in Driver 2 units, not metres
 TYRE_WIDTH_M = 0.14          # gap between a wheel's outer and inner planes
 TYRE_BAND_RADIUS = 0.94      # tread diamond corners, fraction of the wheel radius
@@ -136,6 +137,7 @@ class DriveSim(ShowBase):
                           windowType=options.get("window_type", "onscreen"))
         self.disableMouse()
         self.camLens.setFov(config.CHASE_CAM_FOV)
+        self.camLens.setNearFar(CAMERA_NEAR_M, config.DRAW_DISTANCE_M)
         self.clock = ClockObject.getGlobalClock()
 
         self.cos = load_cosmetics()
