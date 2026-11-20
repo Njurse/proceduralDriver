@@ -257,7 +257,11 @@ CAR_MODEL_INVERT_VERTICAL = True
 HAVANA_MODEL_DIR = (ASSETS / "vehicle" / "havana_model0").as_posix()
 HAVANA_HANDLING_JSON = (ASSETS / "vehicle" / "havana_model0" / "handling.json").as_posix()
 HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.obj").as_posix()
+# config.py
 HAVANA_SHIP_SCALE = 0.01
+DRIVE_CAR_PITCH_OFFSET = -90.0   # model long axis (Z) -> Panda3D +Y (forward)
+DRIVE_CAR_YAW_OFFSET   = 180.0   # fine-tune facing; was previously baked + lost
+HAVANA_WHEEL_SCALE = 0.5
 HAVANA_WHEEL_TEXTURES = (ASSETS / "vehicle" / "wheels" / "havana").as_posix()
 
 # Fixed-point / physics -----------------------------------------------------

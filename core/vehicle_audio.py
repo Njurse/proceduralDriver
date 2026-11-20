@@ -5,6 +5,7 @@ for engine / idle / skid.  Receives a per-frame VehicleAudioState snapshot.
 """
 
 import os
+import logging
 try:
     import config
 except ModuleNotFoundError:
@@ -91,6 +92,11 @@ class AudioManager:
         if self.skid_snd is not None:
             self.skid_ch.play(self.skid_snd, loops=-1)
             self.skid_ch.set_volume(0.0)
+
+        log = logging.getLogger("vehicle_audio")
+        log.info("[audio] engine=%s idle=%s skid=%s",
+                 self.engine_snd is not None, self.idle_snd is not None,
+                 self.skid_snd is not None)
 
     def _clamp(self, v, lo, hi):
         return max(lo, min(hi, v))

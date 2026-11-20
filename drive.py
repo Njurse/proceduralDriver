@@ -129,16 +129,68 @@ class DriveSim(ShowBase):
             self.car = NodePath("fallback_car")
         if self.car.isEmpty():
             self.car = NodePath("fallback_car")
-        # scale ~0.01 keeps the game units car-ish in metres
+
         scale = getattr(config, "HAVANA_SHIP_SCALE", 0.01)
         self.car.setScale(scale)
-        # car authored with inverted vertical coords -> flip Y
+        # car authored with inverted vertical coords -> flip Y (local space)
         if getattr(config, "CAR_MODEL_INVERT_VERTICAL", False):
             self.car.setScale(scale, -scale, scale)
-        self.car.setH(180.0)
+
+        # Rotate so the model's long axis (Z) aligns with Panda3D +Y (forward).
+        self.car.setP(getattr(config, "DRIVE_CAR_PITCH_OFFSET", -90.0))
+        self.car.setH(getattr(config, "DRIVE_CAR_YAW_OFFSET", 180.0))
+
+        # Center the model on its tight bounds so it doesn't orbit its pivot.
+        try:
+            low, high = self.car.getTightBounds()
+            self.car.setPos(-(low + high) * 0.5)
+        except Exception as exc:
+            log.debug("[car] centering failed: %s", exc)
+
         self.car.reparentTo(self.render)
-        # Note: the havana OBJ is a single mesh, so individual wheel spin is
-        # not wired up yet (wheel texture swap remains a 2D-demo feature).
+
+        # Wheel disc nodes (spinning markers) at the wheel offsets.
+        self.wheel_nodes = []
+        self.wheel_spin = 0.0
+        wheel_tex_path = None
+        try:
+            wheel_tex_path = self.cos.wheel_textures.get("clean")
+        except Exception:
+            wheel_tex_path = None
+        wheel_tex = None
+        if wheel_tex_path:
+            try:
+                import os
+                load_path = wheel_tex_path
+                try:
+                    load_path = os.path.relpath(wheel_tex_path, config.ROOT)
+                except ValueError:
+                    pass
+                wheel_tex = self.loader.loadTexture(load_path)
+            except Exception as exc:
+                log.debug("[car] wheel texture load failed: %s", exc)
+                wheel_tex = None
+        wheel_scale = getattr(config, "HAVANA_WHEEL_SCALE", 0.5)
+        for off in self.vehicle.wheel_offsets:
+            # physics (x, y_up, z) -> panda (x, z, y_up)
+            wn = self.render.attachNewNode("wheel")
+            # build a flat disc via CardMaker
+            try:
+                from panda3d.core import CardMaker
+                cm = CardMaker("wheeldisc")
+                cm.setFrame(-0.5, 0.5, -0.5, 0.5)
+                disc = wn.attachNewNode(cm.generate())
+                disc.setScale(wheel_scale)
+                if wheel_tex is not None:
+                    disc.setTexture(wheel_tex, 1)
+                # orient disc so its normal points along the axle (local X):
+                # CardMaker normal is +Z; roll -90 makes it +X.
+                disc.setR(-90.0)
+            except Exception as exc:
+                log.debug("[car] wheel disc build failed: %s", exc)
+            wn.setPos(off[0], off[2], off[1])
+            wn.reparentTo(self.car)
+            self.wheel_nodes.append(wn)
 
     # ------------------------------------------------------------- input
     def _bind_keys(self):
@@ -195,11 +247,23 @@ class DriveSim(ShowBase):
 
     def _sync_car(self):
         v = self.vehicle
-        vx, vy, vz = v.pos
         # physics (x, y_up, z) -> panda (x, y_fwd=z, z_up=y_up)
-        self.car.setPos(vx, vz, vy)
-        self.car.setHpr(math.degrees(v.yaw), math.degrees(v.pitch),
-                        math.degrees(-v.roll))
+        self.car.setPos(v.pos[0], v.pos[2], v.pos[1])
+        self.car.setHpr(
+            math.degrees(v.yaw) + getattr(config, "DRIVE_CAR_YAW_OFFSET", 180.0),
+            math.degrees(v.pitch) + getattr(config, "DRIVE_CAR_PITCH_OFFSET", -90.0),
+            math.degrees(-v.roll))
+
+        # spin the wheel discs about their axle (local X)
+        if self.wheel_nodes:
+            avg = sum(abs(w.wheel_speed) for w in v.wheels) / max(1, len(v.wheels))
+            self.wheel_spin += math.degrees(avg / 0.35) * (1.0 / 60.0)
+            for wn in self.wheel_nodes:
+                try:
+                    disc = wn.getChild(0)
+                    disc.setR(-90.0 + self.wheel_spin)
+                except Exception:
+                    pass
 
     def _update_chase_cam(self):
         v = self.vehicle
@@ -226,7 +290,7 @@ class DriveSim(ShowBase):
         st.throttle = v.throttle
         st.handbrake = 1 if self.key_hb else 0
         st.wheelspin = 0
-        st.wheel_speeds = [abs(w.wheel_speed) for w in v.wheels]
+        st.wheel_speeds = [abs(w.wheel_speed) * 100.0 for w in v.wheels]
         st.slip_lateral = max((w.slip_lateral for w in v.wheels), default=0.0)
         st.slip_longitudinal = max((w.slip_longitudinal for w in v.wheels),
                                   default=0.0)
