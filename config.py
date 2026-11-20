@@ -39,6 +39,7 @@ WORLD_BIOMES = ("plains", "desert")  # assets/world/definitions/<name>.json
 REGION_SCALE_M = 900.0          # wavelength of the noise that splotches the biomes
 REGION_BAND = 0.08              # blend half-width in region-noise units (~200 m)
 ROAD_LIFT_M = 0.04              # road strips sit this far above the flattened ground
+ROAD_DETAIL_TILE_M = 2.5        # metres per repeat of the road detail texture
 
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in

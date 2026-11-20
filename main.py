@@ -54,7 +54,7 @@ from core.redriver2_physics import Input, PhysicsWorld, Vehicle
 from core.textures import NEAREST_PRC, _to_texture, load_color_keyed, seamless_fbm, use_nearest
 from core.units import DR2_UNITS_PER_METRE
 from core.vehicle_audio import AudioManager, sound_input
-from world.chunks import ChunkStreamer, detail_texture
+from world.chunks import ChunkStreamer, detail_texture, road_detail_texture
 from world.sky import build_sky
 from world.world import World
 
@@ -225,7 +225,8 @@ class DriveSim(ShowBase):
         # Endless terrain: chunk meshes streamed round the car (world/chunks.py),
         # vertex-coloured by height and slope over a tiled detail texture.
         self.chunks = ChunkStreamer(self.terrain, self.render,
-                                    detail_texture(self.terrain.detail_texture))
+                                    detail_texture(self.terrain.detail_texture),
+                                    road_texture=road_detail_texture())
         v = self.vehicle
         self.chunks.update(v.pos[0], v.pos[2], budget=(2 * self.chunks.radius + 1) ** 2)
 

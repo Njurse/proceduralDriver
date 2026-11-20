@@ -105,6 +105,24 @@ def chunks_around(x, z, radius, size=None):
     return sorted(keys, key=lambda k: (k[0] - ci) ** 2 + (k[1] - ck) ** 2)
 
 
+def _noise_tile(size, seed, frequency, lo, hi):
+    """Tileable fBm grey texture with its range mapped to [lo, hi] (uint8)."""
+    u = np.linspace(0.0, 1.0, size, endpoint=False)
+    gu, gv = np.meshgrid(u, u)
+
+    def f(du, dv):
+        return (fbm_2d((gu - du) * frequency, (gv - dv) * frequency, seed, 4)
+                + 0.5 * fbm_2d((gu - du) * 4.0 * frequency,
+                               (gv - dv) * 4.0 * frequency, seed + 1, 3))
+
+    # blend four shifted copies so the noise wraps in both u and v
+    tile = ((f(0, 0) * (1 - gu) + f(1, 0) * gu) * (1 - gv)
+            + (f(0, 1) * (1 - gu) + f(1, 1) * gu) * gv)
+    tile = (tile - tile.min()) / max(np.ptp(tile), 1e-9)
+    grey = (lo + (hi - lo) * tile).astype(np.uint8)
+    return np.stack([grey, grey, grey], axis=-1)
+
+
 def detail_texture(path=None, size=256, seed=7):
     """Tileable grey speckle (0.72-1.0) that modulates the vertex colours:
     the grey levels of the image at ``path`` stretched into that range, or
@@ -118,19 +136,16 @@ def detail_texture(path=None, size=256, seed=7):
         grey = (184.0 + 71.0 * tile).astype(np.uint8)
         return _to_texture(np.stack([grey, grey, grey], axis=-1), "terrain_detail",
                            repeat=True)
-    u = np.linspace(0.0, 1.0, size, endpoint=False)
-    gu, gv = np.meshgrid(u, u)
+    return _to_texture(_noise_tile(size, seed, 16.0, 184.0, 255.0),
+                       "terrain_detail", repeat=True)
 
-    def f(du, dv):
-        return (fbm_2d((gu - du) * 16.0, (gv - dv) * 16.0, seed, 4)
-                + 0.5 * fbm_2d((gu - du) * 64.0, (gv - dv) * 64.0, seed + 1, 3))
 
-    # blend four shifted copies so the noise wraps in both u and v
-    tile = ((f(0, 0) * (1 - gu) + f(1, 0) * gu) * (1 - gv)
-            + (f(0, 1) * (1 - gu) + f(1, 1) * gu) * gv)
-    tile = (tile - tile.min()) / max(np.ptp(tile), 1e-9)
-    grey = (184.0 + 71.0 * tile).astype(np.uint8)
-    return _to_texture(np.stack([grey, grey, grey], axis=-1), "terrain_detail", repeat=True)
+def road_detail_texture(size=128, seed=17):
+    """Fine, high-contrast grey speckle (0.45-1.0) for the road strips: twice
+    the noise frequency of the terrain texture, so the grain stays small when
+    the roads tile it every ``config.ROAD_DETAIL_TILE_M`` metres."""
+    return _to_texture(_noise_tile(size, seed, 32.0, 115.0, 255.0),
+                       "road_detail", repeat=True)
 
 
 _FORMAT = None
@@ -173,8 +188,10 @@ def mesh_node(mesh, name):
 class ChunkStreamer:
     """Keeps the chunks round a moving point loaded under ``parent``."""
 
-    def __init__(self, terrain, parent, texture=None, radius=None, builds_per_frame=None):
+    def __init__(self, terrain, parent, texture=None, road_texture=None, radius=None,
+                 builds_per_frame=None):
         self.terrain = terrain
+        self.road_texture = road_texture
         self.root = parent.attachNewNode("terrain")
         if texture is not None:
             self.root.setTexture(texture, 1)
@@ -200,9 +217,13 @@ class ChunkStreamer:
             roads = (self.terrain.road_mesh(*key) if hasattr(self.terrain, "road_mesh")
                      else None)
             if roads is not None:
+                road_node = chunk.attachNewNode(mesh_node(roads, name + "_roads"))
+                if self.road_texture is not None:
+                    # roads tile their own finer, higher-contrast noise
+                    road_node.setTexture(self.road_texture, 1)
                 # just above the flattened ground, and drawn over it where
                 # the depth buffer can't tell them apart
-                chunk.attachNewNode(mesh_node(roads, name + "_roads")).setDepthOffset(1)
+                road_node.setDepthOffset(1)
             self.loaded[key] = chunk
             built += 1
         size = config.TERRAIN_CHUNK_SIZE

@@ -72,8 +72,8 @@ class World(SampledGround):
         if out is None:
             return None
         pos, normal, color, uv, tris = out
-        return ChunkMesh(pos=pos, normal=normal, color=color, uv=uv / self.detail_tile_m,
-                         tris=tris)
+        return ChunkMesh(pos=pos, normal=normal, color=color,
+                         uv=uv / config.ROAD_DETAIL_TILE_M, tris=tris)
 
     def road_steer(self, x, z, heading, lookahead=15.0, gain=2.5):
         """Steering (-1 left .. 1 right) that follows the nearest road the

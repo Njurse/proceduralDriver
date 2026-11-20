@@ -69,7 +69,7 @@ def test_the_two_world_biomes_load_with_their_rules():
 def test_missing_rules_take_defaults_and_bad_ones_are_named():
     b = parse_biome({"name": "x", "terrain": {"amplitude_m": 3}, "notes": [1, 2]})
     assert b.terrain.amplitude_m == 3.0 and b.terrain.octaves == 4
-    assert b.roads.width_m == 7.0 and b.extra == {"notes": [1, 2]}
+    assert b.roads.width_m == 16.0 and b.extra == {"notes": [1, 2]}
     for bad, where in [({"terrain": {"amplitude": 3}}, "unknown key"),
                        ({"terrain": {"octaves": 2.5}}, "octaves"),
                        ({"terrain": {"persistence": 1.5}}, "persistence"),

@@ -59,7 +59,7 @@ class RoadRules:
     grid_spacing_m: float = 200.0    # distance between parallel roads
     jitter_m: float = 25.0           # random shift of each grid node
     curviness_m: float = 40.0        # sideways bow of each road between nodes
-    width_m: float = 7.0
+    width_m: float = 16.0            # road surface width
     shoulder_m: float = 10.0         # terrain blends back from the road over this
     max_grade_pct: float = 8.0       # steepest climb along a road
     surface: str = "asphalt"         # one of ROAD_SURFACES
