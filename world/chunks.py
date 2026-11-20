@@ -193,7 +193,7 @@ class ChunkStreamer:
     """Keeps the chunks round a moving point loaded under ``parent``."""
 
     def __init__(self, terrain, parent, texture=None, road_texture=None, radius=None,
-                 builds_per_frame=None):
+                 builds_per_frame=None, build_ms=None):
         self.terrain = terrain
         self.road_texture = road_texture
         self.root = parent.attachNewNode("terrain")
@@ -202,7 +202,9 @@ class ChunkStreamer:
         self.radius = int(config.TERRAIN_VIEW_CHUNKS if radius is None else radius)
         self.budget = int(config.TERRAIN_BUILDS_PER_FRAME if builds_per_frame is None
                           else builds_per_frame)
+        self.build_ms = float(config.TERRAIN_BUILD_MS if build_ms is None else build_ms)
         self.loaded = {}
+        self._roadless = set()      # loaded, road strips still to add (a step of their own)
         self._batch = [0, 0.0, 0]   # built, ms, dropped since the last summary
 
     def reset(self, terrain):
@@ -210,55 +212,66 @@ class ChunkStreamer:
         for node in self.loaded.values():
             node.removeNode()
         self.loaded.clear()
+        self._roadless.clear()
         self.terrain = terrain
 
     def update(self, x, z, budget=None):
         """Build up to ``budget`` (default TERRAIN_BUILDS_PER_FRAME) missing
         chunks, nearest first, and drop chunks more than radius + 1 away.
-        Per frame (no ``budget``) it also stops once TERRAIN_BUILD_MS is
-        spent, so streaming never costs more than about one chunk a frame.
-        Returns the number built."""
-        stop = (time.perf_counter() + config.TERRAIN_BUILD_MS / 1000.0 if budget is None
-                else math.inf)
+        Per frame (no ``budget``) a chunk's ground and its road strips are
+        separate steps, and building stops once ``build_ms`` is spent, so
+        streaming costs about one step a frame.  Returns the steps taken."""
+        per_frame = budget is None
+        stop = time.perf_counter() + self.build_ms / 1000.0 if per_frame else math.inf
         budget = self.budget if budget is None else budget
         roads = getattr(self.terrain, "roads", None)
         if roads is not None:
             roads.prefetch(x, z, (self.radius + 1) * config.TERRAIN_CHUNK_SIZE)
-        wanted = chunks_around(x, z, self.radius)
-        built = 0
-        for key in wanted:
-            if key in self.loaded:
+        has_roads = hasattr(self.terrain, "road_mesh")
+        built, left = 0, False
+        for key in chunks_around(x, z, self.radius):
+            fresh = key not in self.loaded
+            if not fresh and key not in self._roadless:
                 continue
             if built >= budget or time.perf_counter() >= stop:
+                left = True
                 break
             t0 = time.perf_counter()
-            name = f"chunk_{key[0]}_{key[1]}"
-            chunk = self.root.attachNewNode(mesh_node(chunk_mesh(self.terrain, *key), name))
-            roads = (self.terrain.road_mesh(*key) if hasattr(self.terrain, "road_mesh")
-                     else None)
-            if roads is not None:
-                road_node = chunk.attachNewNode(mesh_node(roads, name + "_roads"))
-                if self.road_texture is not None:
-                    # roads tile their own finer, higher-contrast noise
-                    road_node.setTexture(self.road_texture, 1)
-                # just above the flattened ground, and drawn over it where
-                # the depth buffer can't tell them apart
-                road_node.setDepthOffset(1)
-            self.loaded[key] = chunk
+            if fresh:
+                name = f"chunk_{key[0]}_{key[1]}"
+                self.loaded[key] = self.root.attachNewNode(
+                    mesh_node(chunk_mesh(self.terrain, *key), name))
+                self._batch[0] += 1
+                if has_roads:
+                    self._roadless.add(key)
+            if key in self._roadless and not (fresh and per_frame):
+                self._roadless.discard(key)
+                self._add_roads(key)
             built += 1
-            ms = (time.perf_counter() - t0) * 1000.0
-            self._batch[0] += 1
-            self._batch[1] += ms
-            log.debug("chunk %s built in %.1f ms (roads: %s)", key, ms, roads is not None)
+            self._batch[1] += (time.perf_counter() - t0) * 1000.0
         size = config.TERRAIN_CHUNK_SIZE
         ci, ck = math.floor(x / size), math.floor(z / size)
         for key in [k for k in self.loaded
                     if max(abs(k[0] - ci), abs(k[1] - ck)) > self.radius + 1]:
             self.loaded.pop(key).removeNode()
+            self._roadless.discard(key)
             self._batch[2] += 1
         b = self._batch
-        if built < budget and (b[0] or b[2]):   # nothing left to build: one line per batch
+        if not left and (b[0] or b[2]):   # nothing left to build: one line per batch
             log.info("chunks: +%d in %.0f ms (%.1f ms each), -%d, %d loaded",
                      b[0], b[1], b[1] / max(b[0], 1), b[2], len(self.loaded))
             self._batch = [0, 0.0, 0]
         return built
+
+    def _add_roads(self, key):
+        roads = self.terrain.road_mesh(*key)
+        if roads is None:
+            return
+        name = f"chunk_{key[0]}_{key[1]}_roads"
+        road_node = self.loaded[key].attachNewNode(mesh_node(roads, name))
+        if self.road_texture is not None:
+            # roads tile their own finer, higher-contrast noise
+            road_node.setTexture(self.road_texture, 1)
+        # just above the flattened ground, and drawn over it where the depth
+        # buffer can't tell them apart
+        road_node.setDepthOffset(1)

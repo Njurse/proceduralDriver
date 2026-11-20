@@ -107,7 +107,7 @@ def test_chunks_stream_round_the_car(terrain):
     from panda3d.core import NodePath
 
     root = NodePath("root")
-    s = ChunkStreamer(terrain, root, radius=2, builds_per_frame=3)
+    s = ChunkStreamer(terrain, root, radius=2, builds_per_frame=3, build_ms=math.inf)
     assert s.update(10.0, 10.0) == 3
     assert (0, 0) in s.loaded  # the chunk under the car comes first
     s.update(10.0, 10.0, budget=100)
