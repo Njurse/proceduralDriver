@@ -1,5 +1,8 @@
 # REDRIVER2 Vehicle Physics Port — Planning & Implementation Document
 
+> Historical porting plan.  The space game, the pygame `demo.py` and the module
+> layout in section 4.1 are gone; `README.md` describes the current project.
+
 ## Purpose
 Port the core vehicle dynamics model from OpenDriver2/REDRIVER2 (a reverse-engineered port of Driver 2) to a Pygame-based driving prototype for `vibe_procedural_driver6`. The original game is a PS1-era driving title; this document records the architecture, C→Python mappings, simplifications, audio integration, and tuning notes so the port is traceable and maintainable.
 
