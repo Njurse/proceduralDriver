@@ -14,6 +14,7 @@ log = logging.getLogger("galaxy_explorer.gamepad")
 _AXIS_LEFT_X = 0
 _AXIS_LEFT_Y = 1
 _AXIS_RIGHT_X = 2
+_AXIS_RIGHT_Y = 3  # positive = stick pulled down (SDL convention)
 _AXIS_LT = 4
 _AXIS_RT = 5
 
@@ -25,6 +26,7 @@ _BUTTON_LB = 4
 _BUTTON_RB = 5
 _BUTTON_SELECT = 6
 _BUTTON_START = 7
+_BUTTON_RIGHT_THUMB = 9  # R3 (stick click)
 _BUTTON_DPAD_UP = 11
 _BUTTON_DPAD_DOWN = 12
 _BUTTON_DPAD_LEFT = 13
@@ -237,10 +239,11 @@ class Gamepad:
             return
         pad = state.Gamepad
         axes = [0.0] * 8
-        # Match existing mapping: 0 LX, 1 LY, 2 RX, 4 LT, 5 RT
+        # Match existing mapping: 0 LX, 1 LY, 2 RX, 3 RY, 4 LT, 5 RT
         axes[_AXIS_LEFT_X] = _norm_thumb(pad.sThumbLX)
         axes[_AXIS_LEFT_Y] = _norm_thumb(pad.sThumbLY)
         axes[_AXIS_RIGHT_X] = _norm_thumb(pad.sThumbRX)
+        axes[_AXIS_RIGHT_Y] = -_norm_thumb(pad.sThumbRY)  # XInput Y is up-positive
         axes[_AXIS_LT] = pad.bLeftTrigger / 255.0
         axes[_AXIS_RT] = pad.bRightTrigger / 255.0
         buttons = [False] * 16
@@ -253,6 +256,7 @@ class Gamepad:
         buttons[_BUTTON_RB] = bool(w & _RIGHT_SHOULDER)
         buttons[_BUTTON_SELECT] = bool(w & _BACK)
         buttons[_BUTTON_START] = bool(w & _START)
+        buttons[_BUTTON_RIGHT_THUMB] = bool(w & _RIGHT_THUMB)
         buttons[_BUTTON_DPAD_UP] = bool(w & _DPAD_UP)
         buttons[_BUTTON_DPAD_DOWN] = bool(w & _DPAD_DOWN)
         buttons[_BUTTON_DPAD_LEFT] = bool(w & _DPAD_LEFT)
@@ -346,6 +350,14 @@ class Gamepad:
     @property
     def right_x(self):
         return self.stick(_AXIS_RIGHT_X)
+
+    @property
+    def right_y(self):
+        return self.stick(_AXIS_RIGHT_Y)
+
+    @property
+    def right_thumb(self):
+        return self.button(_BUTTON_RIGHT_THUMB)
 
     @property
     def left_trigger(self):
