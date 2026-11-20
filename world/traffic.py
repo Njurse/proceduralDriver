@@ -35,9 +35,12 @@ class Car:
     def pose(self):
         """(position (3,), rotation (3, 3)): columns right, up, forward."""
         pos, fwd = self.lane.at(self.s)
-        right = np.array([fwd[2], 0.0, -fwd[0]])
-        right /= max(float(np.linalg.norm(right)), 1e-9)
-        return pos, np.stack([right, np.cross(fwd, right), fwd], axis=1)
+        fx, fy, fz = fwd.tolist()                  # plain floats: a dozen cars a frame
+        n = max(math.sqrt(fz * fz + fx * fx), 1e-9)
+        rx, rz = fz / n, -fx / n                   # right, level
+        return pos, np.array([[rx, fy * rz, fx],   # up = forward x right
+                              [0.0, fz * rx - fx * rz, fy],
+                              [rz, -fy * rx, fz]])
 
 
 def _turn(a, b):
