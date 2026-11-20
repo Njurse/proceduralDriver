@@ -17,9 +17,17 @@ CAR_MODEL_INVERT_VERTICAL = False
 HAVANA_HANDLING_JSON = (ASSETS / "vehicle" / "havana_model0" / "handling.json").as_posix()
 HAVANA_MODEL_OBJ = (ASSETS / "vehicle" / "havana_model0" / "HAVANA_model0_clean.obj").as_posix()
 
-# Driving world -------------------------------------------------------------
-DRIVE_FOG_DENSITY = 0.005       # exponential fog density for the ground plane
-DRIVE_BOUNDARY_MARGIN = 12.0    # keep the car this far inside the ground quad
+# Procedural terrain (world/terrain.py, world/chunks.py) --------------------
+# Rolling hills: Perlin fBm, height = AMPLITUDE * fbm(x / SCALE, z / SCALE).
+TERRAIN_SEED = 1977
+TERRAIN_SCALE = 140.0           # metres per noise cell of the first octave
+TERRAIN_OCTAVES = 4
+TERRAIN_AMPLITUDE = 10.0        # metres; hills reach about +-5 m, slopes under 10 deg
+TERRAIN_CHUNK_SIZE = 64.0       # metres per square chunk
+TERRAIN_CHUNK_RES = 32          # quads per chunk side (2 m spacing)
+TERRAIN_VIEW_CHUNKS = 3         # chunks kept loaded in each direction round the car
+TERRAIN_BUILDS_PER_FRAME = 2    # chunk meshes built per frame while streaming
+DRIVE_FOG_DENSITY = 0.011       # exp-squared fog; hides the streaming edge
 
 # Chase camera (main.py).  Heights are above the car body's origin (~0.77 m
 # off the road).  The aim point sits LOOK_AHEAD metres in front of the car in
