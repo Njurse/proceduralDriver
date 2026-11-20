@@ -78,7 +78,11 @@ def test_settles_on_suspension_at_rest():
     assert np.all(v.vel == 0.0) and np.all(v.avel == 0.0)  # GlobalTimeStep rest snap
     # the C rest snap can freeze the last small bounce a couple of cm high
     assert v.pos[1] == pytest.approx(v.rest_height(), abs=0.03)
-    assert 0.6 < v.pos[1] < 0.9  # body origin height, metres
+    # The havana rebake puts the model origin on the floor (wheelDisp y -30,
+    # cog y -89): the physics origin rests ~0.2 m up and the cog, where the
+    # body is drawn, ~0.8 m up like the stock car's origin.
+    assert 0.1 < v.pos[1] < 0.35
+    assert 0.6 < v.pos[1] + v.geo.model_offset[1] < 0.9
     assert all(w.compression > 0.05 for w in v.wheels)
 
 
