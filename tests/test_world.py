@@ -417,3 +417,15 @@ def test_large_biomes_make_larger_regions(world):
     small = np.mean([r for n, rs in runs.items() if n != "metropolis" for r in rs])
     assert world.biomes[names.index("metropolis")].region_size == 4
     assert big > 2.0 * small, (big, small)
+
+
+def test_prefetched_super_cells_match_ones_built_on_demand():
+    """The worker thread builds the cells ahead; the roads are the same."""
+    a, b = World(seed=3), World(seed=3)
+    a.roads.prefetch(4000.0, -2000.0, 400.0)
+    a.roads._worker.join()
+    assert len(a.roads._cells) >= 2       # the box spans a super-cell border
+    box = (3000.0, -2600.0, 4600.0, -1400.0)
+    ka = [(r.key, r.pts.tobytes()) for r in a.roads.roads_near(*box)]
+    kb = [(r.key, r.pts.tobytes()) for r in b.roads.roads_near(*box)]
+    assert ka and ka == kb

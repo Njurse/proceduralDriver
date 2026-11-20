@@ -221,6 +221,9 @@ class ChunkStreamer:
         stop = (time.perf_counter() + config.TERRAIN_BUILD_MS / 1000.0 if budget is None
                 else math.inf)
         budget = self.budget if budget is None else budget
+        roads = getattr(self.terrain, "roads", None)
+        if roads is not None:
+            roads.prefetch(x, z, (self.radius + 1) * config.TERRAIN_CHUNK_SIZE)
         wanted = chunks_around(x, z, self.radius)
         built = 0
         for key in wanted:
