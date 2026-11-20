@@ -12,11 +12,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.chase_rig import ChaseRig, RigParams  # noqa: E402
 
 
-def _drive(fps, seconds, speed=lambda t: 30.0, yaw_rate=lambda t: 0.0):
+def _drive(fps, seconds, speed=lambda t: 30.0, yaw_rate=lambda t: 0.0,
+           lateral=lambda t: 0.0):
     rig, dt, h, out = ChaseRig(), 1.0 / fps, 0.0, []
     for i in range(round(seconds * fps) + 1):
         t = i * dt
-        out.append((t, *rig.update(dt, h, 0.0, speed(t), speed(t))))
+        out.append((t, *rig.update(dt, h, 0.0, speed(t), speed(t), lateral(t))))
         h += yaw_rate(t) * dt
     return out, h
 
@@ -48,11 +49,19 @@ def test_same_motion_at_any_frame_rate(fps):
             assert a[i] == pytest.approx(b[i], abs=tol), (fps, t_ref, i)
 
 
-def test_swings_wide_and_leans_into_a_right_turn():
-    out, h = _drive(60, 2.0, yaw_rate=lambda t: 0.8)
+def test_swings_wide_but_grip_cornering_does_not_rock():
+    out, h = _drive(60, 2.0, yaw_rate=lambda t: 0.8, lateral=lambda t: -1.5)
     _, yaw, _, _, roll = out[-1]
     assert 0.02 < h - yaw < 0.3       # trails the heading a little
+    assert roll == 0.0                # 1.5 m/s at 30 m/s is ~3 deg of slip: grip
+
+
+def test_a_slide_leans_gently_into_it():
+    out, _ = _drive(60, 3.0, yaw_rate=lambda t: 0.8, lateral=lambda t: -9.0)
+    roll = out[-1][4]
     assert 0.5 < roll <= RigParams().roll_max
+    jitter, _ = _drive(60, 2.0, lateral=lambda t: 6.0 if int(t * 30) % 2 else -6.0)
+    assert max(abs(r[4]) for r in jitter) < 0.3      # a twitchy signal barely shows
 
 
 def test_speed_widens_the_view_and_pulls_back():

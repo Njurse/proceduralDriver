@@ -94,7 +94,6 @@ class DriveSim(Controls, ChaseCamera, CarView, TrafficDraw, ShowBase):
         self.spin = 0.0
         # smoothed body motion the chase camera hangs back from (see config)
         self.cam_vert = 0.0
-        self.cam_side = 0.0
         self.cam_rig = ChaseRig(rig_params())
 
         self.taskMgr.add(self._update, "drive-update")
@@ -200,7 +199,7 @@ class DriveSim(Controls, ChaseCamera, CarView, TrafficDraw, ShowBase):
         v = self.vehicle
         self.chunks.update(v.pos[0], v.pos[2], budget=(2 * self.chunks.radius + 1) ** 2)
         self.orbit = OrbitCamera()
-        self.cam_vert = self.cam_side = 0.0
+        self.cam_vert = 0.0
         self.cam_rig.reset()
         self._sync_car(0.0)
         self._update_chase_cam(1.0 / 60.0)

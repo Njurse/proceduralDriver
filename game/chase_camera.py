@@ -38,24 +38,25 @@ class ChaseCamera:
         h = v.heading
         angle = self._orbit_angle(dt)
         speed = math.hypot(v.vel[0], v.vel[2])
-        yaw, dist, fov, roll = self.cam_rig.update(dt, h, angle, speed, v.forward_speed,
-                                                   snap=self.cam_override is not None)
         # car yaw frame -> physics world: right (cos h, 0, -sin h), fwd (sin h, 0, cos h)
         right = np.array([math.cos(h), 0.0, -math.sin(h)])
+        yaw, dist, fov, roll = self.cam_rig.update(dt, h, angle, speed, v.forward_speed,
+                                                   float(v.vel @ right),
+                                                   snap=self.cam_override is not None)
         fwd = np.array([math.sin(h), 0.0, math.cos(h)])
         # the rig's yaw trails heading - orbit angle: the camera sits dist behind
         # along it, as high as the rest framing scaled with the pull-back
         offset = -np.array([math.sin(yaw), 0.0, math.cos(yaw)]) * dist
         offset[1] = config.CHASE_CAM_HEIGHT * dist / config.CHASE_CAM_DIST
         # Rough ground and slides: the camera hangs back from the body's
-        # vertical and sideways motion instead of being welded to it, so
-        # bumps bob the view and drifts sway it.  First-order and clamped.
+        # vertical motion, so bumps bob the view, and sways with a slide (the
+        # rig's slip past the grip deadzone, not plain cornering).  Clamped.
         k = 1.0 - math.exp(-dt / config.CHASE_CAM_BOB_TAU)
         kick = config.CHASE_CAM_KICK_MAX
         self.cam_vert += (v.vel[1] - self.cam_vert) * k
-        self.cam_side += (float(v.vel @ right) - self.cam_side) * k
         offset[1] -= max(-kick, min(kick, self.cam_vert)) * config.CHASE_CAM_BOB
-        offset -= right * (max(-kick, min(kick, self.cam_side)) * config.CHASE_CAM_SWAY)
+        slide = self.cam_rig.slide
+        offset -= right * (max(-kick, min(kick, slide)) * config.CHASE_CAM_SWAY)
         eye = v.pos + offset
         ground = self.terrain.height
         eye[1] = max(eye[1], ground(eye[0], eye[2]) + CAM_TERRAIN_CLEARANCE)
@@ -84,5 +85,6 @@ def rig_params():
         yaw_lag_s=config.CHASE_CAM_YAW_LAG_S, dist_lag_s=config.CHASE_CAM_DIST_LAG_S,
         speed_ref=config.CHASE_CAM_SPEED_REF, pull_back=config.CHASE_CAM_PULL_BACK,
         fov_gain=config.CHASE_CAM_FOV_GAIN, accel_lag=config.CHASE_CAM_ACCEL_LAG,
-        accel_lag_max=config.CHASE_CAM_ACCEL_LAG_MAX, roll_gain=config.CHASE_CAM_ROLL_GAIN,
-        roll_max=config.CHASE_CAM_ROLL_MAX)
+        accel_lag_max=config.CHASE_CAM_ACCEL_LAG_MAX,
+        slip_deadzone_deg=config.CHASE_CAM_SLIP_DEADZONE_DEG,
+        roll_gain=config.CHASE_CAM_ROLL_GAIN, roll_max=config.CHASE_CAM_ROLL_MAX)

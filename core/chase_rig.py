@@ -10,7 +10,10 @@ same drive looks the same at 30 or 144 fps:
 * ``dist``: the follow distance, pulled back with speed and by a lag on
   hard acceleration (and pushed in under braking), sprung the same way;
 * ``fov``: widened with speed;
-* ``roll``: a small lean into the turn from the lateral acceleration.
+* ``slide`` / ``roll``: the body's sideways velocity beyond a slip angle
+  deadzone (normal cornering grip reads ~0), smoothed; it leans the view a
+  little into a slide and lets the camera sway with it.  Steering and yaw
+  rate do not feed it, so a twitchy stick cannot rock the view.
 """
 
 import math
@@ -50,9 +53,12 @@ class RigParams:
     accel_lag: float = 0.12         # metres back per m/s^2 of forward acceleration
     accel_lag_max: float = 1.2      # metres, either way
     accel_tau: float = 0.25         # smoothing of the acceleration signal
-    roll_gain: float = 0.35         # degrees of lean per m/s^2 of lateral acceleration
-    roll_max: float = 3.0           # degrees
-    roll_tau: float = 0.3           # seconds
+    slip_deadzone_deg: float = 6.0  # slip angles inside this are grip, not a slide
+    slip_tau: float = 0.25          # smoothing of the slide signal
+    slip_min_speed: float = 8.0     # m/s: below this the slide fades out (spins on the spot)
+    roll_gain: float = 0.25         # degrees of lean per m/s of slide
+    roll_max: float = 1.5           # degrees
+    roll_tau: float = 0.45          # seconds
     max_dt: float = 0.1             # longer frames (hitches, pauses) count as this
 
 
@@ -69,29 +75,33 @@ class ChaseRig:
         self.dist = self.dist_vel = 0.0
         self.fov = self.p.fov
         self.roll = 0.0
+        self.slide = 0.0
         self.accel = 0.0
         self._fwd_speed = 0.0
-        self._heading = 0.0
 
-    def update(self, dt, heading, orbit_angle, speed, fwd_speed, snap=False):
+    def update(self, dt, heading, orbit_angle, speed, fwd_speed, lateral=0.0, snap=False):
         """Advance by ``dt``: returns (yaw, dist, fov, roll), yaw in the heading
         convention (the camera sits ``dist`` behind along it), roll in degrees
-        (positive: lean right, into a right-hand turn).  ``snap`` puts the yaw
+        (positive: lean right, into a right-hand slide).  ``lateral`` is the
+        body's velocity along its right axis (m/s).  ``snap`` puts the yaw
         straight on its target (a fixed camera angle)."""
         p = self.p
         target_yaw = heading - orbit_angle
         if not self.ready:
             self.ready = True
             self.yaw, self.dist = target_yaw, p.dist
-            self._fwd_speed, self._heading = fwd_speed, heading
+            self._fwd_speed = fwd_speed
             return self.yaw, self.dist, self.fov, self.roll
         dt = min(max(dt, 0.0), p.max_dt)
         if dt <= 0.0:
             return self.yaw, self.dist, self.fov, self.roll
-        # signals: forward acceleration and yaw rate, smoothed
+        # signals: forward acceleration, and the slide beyond the grip deadzone
         self.accel = _follow(self.accel, (fwd_speed - self._fwd_speed) / dt, dt, p.accel_tau)
-        yaw_rate = _wrap(heading - self._heading) / dt
-        self._fwd_speed, self._heading = fwd_speed, heading
+        self._fwd_speed = fwd_speed
+        grip = abs(fwd_speed) * math.tan(math.radians(p.slip_deadzone_deg))
+        slide = math.copysign(max(0.0, abs(lateral) - grip), lateral)
+        slide *= min(1.0, abs(speed) / p.slip_min_speed)
+        self.slide = _follow(self.slide, slide, dt, p.slip_tau)
         f = min(1.0, abs(speed) / p.speed_ref)
         # yaw: unwrap the target next to the current value, then spring to it
         target_yaw = self.yaw + _wrap(target_yaw - self.yaw)
@@ -104,8 +114,8 @@ class ChaseRig:
         self.dist, self.dist_vel = smooth_damp(self.dist, p.dist + p.pull_back * f + lag,
                                                self.dist_vel, p.dist_lag_s, dt)
         self.fov = _follow(self.fov, p.fov + p.fov_gain * f, dt, p.fov_tau)
-        lateral = abs(speed) * yaw_rate
-        roll = max(-p.roll_max, min(p.roll_max, lateral * p.roll_gain))
+        # sliding left (the tail out in a right-hander): lean right, into the turn
+        roll = max(-p.roll_max, min(p.roll_max, -self.slide * p.roll_gain))
         self.roll = _follow(self.roll, roll, dt, p.roll_tau)
         # keep yaw bounded without a jump in the spring's frame
         if abs(self.yaw) > 4.0 * math.pi:
