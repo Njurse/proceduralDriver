@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
 from core.car_profile import load_cosmetics  # noqa: E402
 from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
-from world.spec import load_biome, load_biomes  # noqa: E402
+from world.spec import load_biome, load_biomes, world_spec  # noqa: E402
 from world.world import World  # noqa: E402
 from worldgen.biomes import parse_biome  # noqa: E402
 from worldgen.chunk import chunk_mesh  # noqa: E402
@@ -28,7 +28,8 @@ from worldgen.palette import terrain_colors  # noqa: E402
 from worldgen.roads import MARKING_LIFT, layout  # noqa: E402
 
 DT = 1.0 / 60.0
-SIZE = config.TERRAIN_CHUNK_SIZE
+SPEC = world_spec(biomes=())
+SIZE = SPEC.chunk_size_m
 
 
 @pytest.fixture(scope="module")
@@ -167,7 +168,7 @@ def test_chunk_colours_follow_the_biome(world):
     for b in world.biomes:
         x, z = world.regions.site_of(b.name)
         key = (math.floor(x / SIZE), math.floor(z / SIZE))
-        m = chunk_mesh(world, *key)
+        m = chunk_mesh(world, *key, world.spec)
         assert (world.border_weight(m.pos[:, 0], m.pos[:, 2]) == 1.0).all()
         t = b.terrain
         want = terrain_colors(m.pos[:, 1] - t.base_height_m, m.normal, t.amplitude_m,
@@ -181,7 +182,7 @@ def test_the_world_is_deterministic():
     b.sample(5000.0, -7000.0)  # a different query order must not matter
     b.road_mesh(40, -12)
     for key in [(3, 4), (-2, 0), (0, -5)]:
-        ma, mb = chunk_mesh(a, *key), chunk_mesh(b, *key)
+        ma, mb = chunk_mesh(a, *key, a.spec), chunk_mesh(b, *key, b.spec)
         np.testing.assert_array_equal(ma.pos, mb.pos)
         np.testing.assert_array_equal(ma.color, mb.color)
         ra, rb = a.road_mesh(*key), b.road_mesh(*key)
@@ -196,8 +197,8 @@ def test_chunks_and_road_strips_meet_without_seams(world):
     x, z, _ = world.spawn()  # a 6 x 6 chunk block round the spawn road
     ci, ck = int(x // SIZE), int(z // SIZE)
     keys = [(i, k) for i in range(ci - 3, ci + 3) for k in range(ck - 3, ck + 3)]
-    meshes = {key: chunk_mesh(world, *key) for key in keys}
-    res = config.TERRAIN_CHUNK_RES
+    meshes = {key: chunk_mesh(world, *key, world.spec) for key in keys}
+    res = SPEC.chunk_res
     for (i, k), m in meshes.items():
         g = m.pos.reshape(res + 1, res + 1, 3)
         if (i + 1, k) in meshes:
@@ -404,7 +405,7 @@ def test_l_corners_sharp_or_rounded_and_drivable(radius):
         for dx, dz in [(0, 0), (1, 1), (-1, 1), (1, -1), (-1, -1)]:
             px = r.pts[k] + 0.6 * r.half_width * np.array([dx, dz]) / max(1, math.hypot(dx, dz))
             assert w.query(*px)[3]
-        s = w.road_mesh(*(math.floor(c / config.TERRAIN_CHUNK_SIZE) for c in r.pts[k]))
+        s = w.road_mesh(*(math.floor(c / w.spec.chunk_size_m) for c in r.pts[k]))
         assert s is not None and np.isfinite(s.pos).all()
 
 

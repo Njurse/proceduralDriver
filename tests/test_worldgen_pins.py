@@ -68,7 +68,7 @@ def digests(seed):
     out["world_heights"] = _digest(*w.query(gx, gz))
     ci, ck = int(x0 // 64), int(z0 // 64)
     keys = [(ci, ck), (ci + 1, ck - 2), (ci - 3, ck + 1), (0, 0), (-5, 7)]
-    meshes = [chunk_mesh(w, *k) for k in keys]
+    meshes = [chunk_mesh(w, *k, w.spec) for k in keys]
     out["chunk_meshes"] = _digest(*[a for m in meshes
                                     for a in (m.pos, m.normal, m.color, m.uv, m.tris)])
     roads = [w.road_mesh(*k) for k in keys]

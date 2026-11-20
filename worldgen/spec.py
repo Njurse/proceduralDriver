@@ -19,4 +19,5 @@ class WorldSpec:
     region_jitter: float = 0.35      # site shift, as a fraction of the spacing
     region_band_m: float = 240.0     # width of the blend between neighbouring regions
     chunk_size_m: float = 64.0       # metres per square chunk (meshes, road strips)
+    chunk_res: int = 32              # quads per chunk side
     roads: RoadSpec = RoadSpec()

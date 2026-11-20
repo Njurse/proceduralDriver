@@ -26,6 +26,7 @@ def world_spec(seed=None, biomes=None):
                      region_scale_m=config.REGION_SCALE_M, region_jitter=config.REGION_JITTER,
                      region_band_m=config.REGION_BAND_M,
                      chunk_size_m=config.TERRAIN_CHUNK_SIZE,
+                     chunk_res=config.TERRAIN_CHUNK_RES,
                      roads=RoadSpec(min_junction_deg=config.ROAD_MIN_JUNCTION_DEG,
                                     lift_m=config.ROAD_LIFT_M,
                                     detail_tile_m=config.ROAD_DETAIL_TILE_M))

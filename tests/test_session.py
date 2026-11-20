@@ -15,11 +15,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config  # noqa: E402
 from world.save import SaveState, encode_chunks, read_save, write_save  # noqa: E402
 from world.session import Session  # noqa: E402
+from world.spec import world_spec  # noqa: E402
 from world.worldmap import TileCache, chunk_tile, export_world, minimap_image  # noqa: E402
 from worldgen.chunk import chunk_mesh  # noqa: E402
 
 DT = 1.0 / 60.0
-SIZE = config.TERRAIN_CHUNK_SIZE
+SIZE = world_spec(biomes=()).chunk_size_m
 
 
 def _inp(steer=0.0, throttle=0.0):
@@ -159,8 +160,8 @@ def test_a_seed_change_rebuilds_the_same_world_as_a_fresh_start(tmp_path):
     assert s.explorer.discovered == fresh.explorer.discovered
     np.testing.assert_array_equal(s.vehicle.pos, fresh.vehicle.pos)
     for key in [(0, 0), (2, -3)]:
-        np.testing.assert_array_equal(chunk_mesh(s.world, *key).pos,
-                                      chunk_mesh(fresh.world, *key).pos)
+        np.testing.assert_array_equal(chunk_mesh(s.world, *key, s.world.spec).pos,
+                                      chunk_mesh(fresh.world, *key, fresh.world.spec).pos)
     assert read_save(path).seed == 42
     assert read_save(tmp_path / "world_11.json") == old  # the old world was kept
 

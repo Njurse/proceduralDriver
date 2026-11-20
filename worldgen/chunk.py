@@ -1,7 +1,7 @@
 """Terrain chunks as plain numpy meshes (no Panda3D).
 
 Chunk (i, k) covers x in [i * size, (i + 1) * size] and z in
-[k * size, (k + 1) * size]; ``chunk_mesh`` grids it for any Ground, painted
+[k * size, (k + 1) * size] (size: WorldSpec.chunk_size_m); ``chunk_mesh`` grids it for any Ground, painted
 by the ground's ``colors`` (or the default palette).  The game turns these
 into GeomNodes (game/world_view.py).
 """
@@ -13,8 +13,6 @@ import numpy as np
 
 from worldgen.palette import terrain_colors
 
-CHUNK_SIZE_M = 64.0      # metres per square chunk
-CHUNK_RES = 32           # quads per chunk side (2 m spacing)
 DETAIL_TILE_M = 8.0      # metres per repeat of the detail texture
 
 
@@ -29,13 +27,14 @@ class ChunkMesh:
     tris: np.ndarray     # (m, 3) vertex indices
 
 
-def chunk_mesh(terrain, ci, ck, size=CHUNK_SIZE_M, res=CHUNK_RES):
-    """Grid mesh of chunk (ci, ck): (res + 1)^2 vertices, 2 res^2 triangles.
+def chunk_mesh(terrain, ci, ck, spec):
+    """Grid mesh of chunk (ci, ck): (res + 1)^2 vertices, 2 res^2 triangles
+    (size and res from the WorldSpec).
 
     Vertex x/z are computed as (chunk * res + index) * step so neighbouring
     chunks produce bit-identical edge vertices.
     """
-    size, res = float(size), int(res)
+    size, res = float(spec.chunk_size_m), int(spec.chunk_res)
     step = size / res
     idx = np.arange(res + 1)
     gx, gz = np.meshgrid((ci * res + idx) * step, (ck * res + idx) * step)
@@ -60,7 +59,7 @@ def chunk_mesh(terrain, ci, ck, size=CHUNK_SIZE_M, res=CHUNK_RES):
                      uv=np.stack([x, z], axis=-1) / tile, tris=tris)
 
 
-def chunks_around(x, z, radius, size=CHUNK_SIZE_M):
+def chunks_around(x, z, radius, size):
     """Chunk keys within ``radius`` chunks of the one under (x, z), nearest first."""
     size = float(size)
     ci, ck = math.floor(x / size), math.floor(z / size)

@@ -97,7 +97,7 @@ class Minimap:
         """Per frame: turn the arrow, sample a few chunk tiles, and redraw the
         map image when due and something changed (or ``force``)."""
         self.arrow.setR(math.degrees(heading))
-        size = config.TERRAIN_CHUNK_SIZE
+        size = self.cache.world.spec.chunk_size_m
         ci, ck = math.floor(pos[0] / size), math.floor(pos[1] / size)
         todo = sorted((k for k in loaded if k not in self.cache.tiles),
                       key=lambda k: (k[0] - ci) ** 2 + (k[1] - ck) ** 2)

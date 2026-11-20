@@ -116,8 +116,9 @@ class ChunkStreamer:
     """Keeps the chunks round a moving point loaded under ``parent``."""
 
     def __init__(self, terrain, parent, texture=None, road_texture=None, radius=None,
-                 builds_per_frame=None, build_ms=None):
+                 builds_per_frame=None, build_ms=None, spec=None):
         self.terrain = terrain
+        self.spec = terrain.spec if spec is None else spec   # chunk size and res
         self.road_texture = road_texture
         self.root = parent.attachNewNode("terrain")
         if texture is not None:
@@ -137,6 +138,7 @@ class ChunkStreamer:
         self.loaded.clear()
         self._roadless.clear()
         self.terrain = terrain
+        self.spec = terrain.spec
 
     def update(self, x, z, budget=None):
         """Build up to ``budget`` (default TERRAIN_BUILDS_PER_FRAME) missing
@@ -149,10 +151,10 @@ class ChunkStreamer:
         budget = self.budget if budget is None else budget
         roads = getattr(self.terrain, "roads", None)
         if roads is not None:
-            roads.prefetch(x, z, (self.radius + 1) * config.TERRAIN_CHUNK_SIZE)
+            roads.prefetch(x, z, (self.radius + 1) * self.spec.chunk_size_m)
         has_roads = hasattr(self.terrain, "road_mesh")
         built, left = 0, False
-        for key in chunks_around(x, z, self.radius, config.TERRAIN_CHUNK_SIZE):
+        for key in chunks_around(x, z, self.radius, self.spec.chunk_size_m):
             fresh = key not in self.loaded
             if not fresh and key not in self._roadless:
                 continue
@@ -163,8 +165,7 @@ class ChunkStreamer:
             if fresh:
                 name = f"chunk_{key[0]}_{key[1]}"
                 self.loaded[key] = self.root.attachNewNode(
-                    mesh_node(chunk_mesh(self.terrain, *key, config.TERRAIN_CHUNK_SIZE,
-                                         config.TERRAIN_CHUNK_RES), name))
+                    mesh_node(chunk_mesh(self.terrain, *key, self.spec), name))
                 self._batch[0] += 1
                 if has_roads:
                     self._roadless.add(key)
@@ -173,7 +174,7 @@ class ChunkStreamer:
                 self._add_roads(key)
             built += 1
             self._batch[1] += (time.perf_counter() - t0) * 1000.0
-        size = config.TERRAIN_CHUNK_SIZE
+        size = self.spec.chunk_size_m
         ci, ck = math.floor(x / size), math.floor(z / size)
         for key in [k for k in self.loaded
                     if max(abs(k[0] - ci), abs(k[1] - ck)) > self.radius + 1]:

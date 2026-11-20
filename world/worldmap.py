@@ -22,7 +22,7 @@ _LIGHT = np.array([-1.0, 1.4, 1.0]) / math.sqrt(1.0 + 1.96 + 1.0)  # from the NW
 def chunk_tile(world, ci, ck, px, size=None):
     """(rgb uint8 (px, px, 3), road mask (px, px)) for chunk (ci, ck); row 0
     is the chunk's north (max z) edge."""
-    size = float(config.TERRAIN_CHUNK_SIZE if size is None else size)
+    size = float(world.spec.chunk_size_m if size is None else size)
     f = (np.arange(px) + 0.5) / px
     gx, gz = np.meshgrid((ci + f) * size, (ck + 1.0 - f) * size)
     h, hx, hz, on_road = world.query(gx, gz)
@@ -94,7 +94,7 @@ def minimap_image(cache, center, discovered, loaded, px_per_chunk, out_px, grid=
     Loaded chunks are drawn at full brightness, discovered ones dimmed,
     undiscovered ones dark; chunks whose tile isn't cached yet show flat.
     """
-    size = config.TERRAIN_CHUNK_SIZE
+    size = cache.world.spec.chunk_size_m
     mpp = size / px_per_chunk
     u = (np.arange(out_px) + 0.5 - out_px / 2) * mpp
     cx = np.floor((center[0] + u) / size).astype(int)               # per column
@@ -126,7 +126,7 @@ def export_world(world, discovered, path=None, m_per_px=None, max_px=16384):
     """
     if not discovered:
         raise ValueError("nothing discovered yet")
-    size = config.TERRAIN_CHUNK_SIZE
+    size = world.spec.chunk_size_m
     px = max(1, round(size / float(config.EXPORT_M_PER_PX if m_per_px is None else m_per_px)))
     xs = [c[0] for c in discovered]
     zs = [c[1] for c in discovered]
