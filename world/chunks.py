@@ -7,7 +7,9 @@ dropping chunks that fall out of range.  A ground with a ``road_mesh(ci, ck)``
 [i * size, (i + 1) * size] and z in [k * size, (k + 1) * size].
 """
 
+import logging
 import math
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -26,6 +28,8 @@ from panda3d.core import (
 import config
 from core.noise import fbm_2d
 from core.textures import _to_texture
+
+log = logging.getLogger(__name__)
 
 DETAIL_TILE_M = 8.0      # metres per repeat of the detail texture
 
@@ -199,6 +203,7 @@ class ChunkStreamer:
         self.budget = int(config.TERRAIN_BUILDS_PER_FRAME if builds_per_frame is None
                           else builds_per_frame)
         self.loaded = {}
+        self._batch = [0, 0.0, 0]   # built, ms, dropped since the last summary
 
     def reset(self, terrain):
         """Drop every chunk and stream ``terrain`` from now on (new seed)."""
@@ -219,6 +224,7 @@ class ChunkStreamer:
                 continue
             if built >= budget:
                 break
+            t0 = time.perf_counter()
             name = f"chunk_{key[0]}_{key[1]}"
             chunk = self.root.attachNewNode(mesh_node(chunk_mesh(self.terrain, *key), name))
             roads = (self.terrain.road_mesh(*key) if hasattr(self.terrain, "road_mesh")
@@ -233,9 +239,19 @@ class ChunkStreamer:
                 road_node.setDepthOffset(1)
             self.loaded[key] = chunk
             built += 1
+            ms = (time.perf_counter() - t0) * 1000.0
+            self._batch[0] += 1
+            self._batch[1] += ms
+            log.debug("chunk %s built in %.1f ms (roads: %s)", key, ms, roads is not None)
         size = config.TERRAIN_CHUNK_SIZE
         ci, ck = math.floor(x / size), math.floor(z / size)
         for key in [k for k in self.loaded
                     if max(abs(k[0] - ci), abs(k[1] - ck)) > self.radius + 1]:
             self.loaded.pop(key).removeNode()
+            self._batch[2] += 1
+        b = self._batch
+        if built < budget and (b[0] or b[2]):   # nothing left to build: one line per batch
+            log.info("chunks: +%d in %.0f ms (%.1f ms each), -%d, %d loaded",
+                     b[0], b[1], b[1] / max(b[0], 1), b[2], len(self.loaded))
+            self._batch = [0, 0.0, 0]
         return built

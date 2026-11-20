@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import sys
+import time
 
 import numpy as np
 from direct.gui.OnscreenText import OnscreenText
@@ -481,6 +482,7 @@ class DriveSim(ShowBase):
 
     def menu_action(self, action):
         """Carry out what the pause menu chose."""
+        log.info("[menu] %s", action)
         if action == CONTINUE:
             self.set_paused(False)
         elif action == RESTART:
@@ -580,6 +582,18 @@ class DriveSim(ShowBase):
                                     lambda: len(self.session.explorer.discovered))
 
     # ------------------------------------------------------------- frame
+    def _watch(self, v, spent):
+        """Log biome changes, and frames whose physics + chunks ran long
+        (at most one warning per 5 s)."""
+        biome = self.terrain.regions.biome_at(v.pos[0], v.pos[2]).name
+        if biome != getattr(self, "_biome", None):
+            log.info("[world] entering %s at (%.0f, %.0f)", biome, v.pos[0], v.pos[2])
+            self._biome = biome
+        now = time.perf_counter()
+        if spent > 1.0 / 30.0 and now - getattr(self, "_slow_at", -10.0) > 5.0:
+            log.warning("slow frame: physics + chunks took %.0f ms", spent * 1000.0)
+            self._slow_at = now
+
     def _update(self, task):
         dt = min(self.clock.getDt(), 0.05)
         if dt <= 0.0:
@@ -615,8 +629,10 @@ class DriveSim(ShowBase):
         inp.handbrake = handbrake
         inp.fast_steer = fast
         inp.analog = self.pad.connected and abs(self.pad.left_x) > 0.0
+        t0 = time.perf_counter()
         self.session.step(inp, dt)
         self.chunks.update(v.pos[0], v.pos[2])
+        self._watch(v, time.perf_counter() - t0)
 
         self._sync_car(dt)
         self._update_chase_cam(dt)
@@ -872,10 +888,24 @@ def main():
     ap.add_argument("--save", metavar="PATH", default=None,
                     help=f"save file (default {config.SAVE_PATH}; offscreen runs save "
                          "only when this is given)")
+    ap.add_argument("--log-level", default="INFO",
+                    choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    ap.add_argument("-v", "--verbose", action="store_const", const="DEBUG", dest="log_level",
+                    help="per-chunk detail (DEBUG)")
+    ap.add_argument("-q", "--quiet", action="store_const", const="WARNING", dest="log_level")
+    ap.add_argument("--log-file", nargs="?", const="logs/drive.log", metavar="PATH",
+                    help="also log to PATH (default logs/drive.log)")
     args = ap.parse_args()
 
-    logging.basicConfig(level=logging.INFO,
-                        format="%(levelname)s %(name)s: %(message)s")
+    handlers = [logging.StreamHandler()]
+    if args.log_file:
+        os.makedirs(os.path.dirname(args.log_file) or ".", exist_ok=True)
+        handlers.append(logging.FileHandler(args.log_file, encoding="utf-8"))
+    logging.basicConfig(level=args.log_level, handlers=handlers, datefmt="%H:%M:%S",
+                        format="%(asctime)s.%(msecs)03d %(levelname)-5s %(name)s: %(message)s")
+    log.info("[config] chunk %.0f m, view %d chunks, %d builds/frame, biomes: %s",
+             config.TERRAIN_CHUNK_SIZE, config.TERRAIN_VIEW_CHUNKS,
+             config.TERRAIN_BUILDS_PER_FRAME, ", ".join(config.WORLD_BIOMES))
 
     if args.shots:
         args.offscreen = True
@@ -891,10 +921,14 @@ def main():
         game.destroy()
         return 0
     if args.offscreen:
+        t0 = time.perf_counter()
         for _ in range(max(1, args.frames)):
             game.taskMgr.step()
             game.graphicsEngine.renderFrame()
-        log.info("Rendered %d offscreen frames.", max(1, args.frames))
+        spent = time.perf_counter() - t0
+        log.info("Rendered %d offscreen frames in %.1f s (%.1f ms a frame, %.0f fps).",
+                 max(1, args.frames), spent, spent * 1000.0 / max(1, args.frames),
+                 max(1, args.frames) / spent)
         game.destroy()
         return 0
     game.run()
