@@ -16,8 +16,9 @@ from core.car_forces import SURFACE_OFFROAD, SURFACE_ROAD  # noqa: E402
 from core.car_profile import load_cosmetics  # noqa: E402
 from core.redriver2_physics import PhysicsWorld, Vehicle  # noqa: E402
 from world.biomes import load_biome, load_biomes, parse_biome  # noqa: E402
-from world.chunks import chunk_mesh  # noqa: E402
+from world.chunks import chunk_mesh, terrain_colors  # noqa: E402
 from world.ground import Ground  # noqa: E402
+from world.roads import MARKING_LIFT  # noqa: E402
 from world.world import World  # noqa: E402
 
 DT = 1.0 / 60.0
@@ -35,12 +36,29 @@ def _inp(steer=0.0, throttle=0.0):
 
 
 def _border_point(world, x=0.0, z=0.0, reach=4000.0):
-    """A point where the biome weight is 0.5, along +x from (x, z)."""
+    """A point on a border between two biomes (owner weight about 0.5),
+    along +x from (x, z)."""
     xs = np.arange(x, x + reach, 2.0)
-    w = world.biome_weight(xs, np.full_like(xs, z))
-    k = int(np.argmin(np.abs(w - 0.5)))
-    assert abs(w[k] - 0.5) < 0.05, "no biome border along the probe line"
+    w = world.border_weight(xs, np.full_like(xs, z))
+    k = int(np.argmin(w))
+    assert w[k] < 0.55, "no biome border along the probe line"
     return xs[k], z
+
+
+def _borders(world, n=12, reach=12000.0):
+    """Points on biome borders, at most one per pair of biomes, found along
+    a fan of probe lines from the origin."""
+    found = {}
+    for a in np.linspace(0.0, 2.0 * np.pi, 48, endpoint=False):
+        s = np.arange(0.0, reach, 4.0)
+        x, z = s * np.cos(a), s * np.sin(a)
+        w = world.regions.weights(x, z)[0]
+        top = np.argsort(w, axis=1)[:, -2:]
+        on = np.nonzero(w.max(axis=1) < 0.55)[0]
+        for k in on:
+            pair = tuple(sorted(top[k].tolist()))
+            found.setdefault(pair, (x[k], z[k], a))
+    return found
 
 
 def _road_points(world, n=40):
@@ -57,9 +75,13 @@ def _road_points(world, n=40):
 
 
 # ------------------------------------------------------------------ biomes
-def test_the_two_world_biomes_load_with_their_rules():
-    plains, desert = load_biomes()
-    assert (plains.name, desert.name) == config.WORLD_BIOMES
+def test_the_world_biomes_load_with_their_rules():
+    biomes = load_biomes()
+    assert tuple(b.name for b in biomes) == config.WORLD_BIOMES
+    plains, desert = biomes[:2]
+    kinds = {b.name: b.terrain.noise_type for b in biomes}
+    assert kinds["canyon"] == "terraced" and kinds["treacherous"] == "ridged"
+    assert {b.name for b in biomes if b.roads.markings} >= {"village", "treacherous"}
     assert desert.terrain.noise_scale_m > plains.terrain.noise_scale_m
     assert desert.roads.grid_spacing_m == 2 * plains.roads.grid_spacing_m
     assert desert.roads.surface == "packed_sand" and plains.roads.surface == "asphalt"
@@ -70,17 +92,22 @@ def test_missing_rules_take_defaults_and_bad_ones_are_named():
     b = parse_biome({"name": "x", "terrain": {"amplitude_m": 3}, "notes": [1, 2]})
     assert b.terrain.amplitude_m == 3.0 and b.terrain.octaves == 4
     assert b.roads.width_m == 16.0 and b.extra == {"notes": [1, 2]}
+    assert b.weight == 1.0 and b.terrain.noise_type == "fbm" and b.roads.markings is None
     for bad, where in [({"terrain": {"amplitude": 3}}, "unknown key"),
                        ({"terrain": {"octaves": 2.5}}, "octaves"),
                        ({"terrain": {"persistence": 1.5}}, "persistence"),
                        ({"terrain": {"colors": {"low": [1, 2, 3]}}}, "colors.low"),
                        ({"roads": {"surface": "lava"}}, "surface"),
                        ({"roads": {"flatten": 1}}, "flatten"),
-                       ({"roads": {"jitter_m": 90.0}}, "jitter_m")]:
+                       ({"roads": {"jitter_m": 90.0}}, "jitter_m"),
+                       ({"terrain": {"noise_type": "voronoi"}}, "noise_type"),
+                       ({"terrain": {"terrace_steps": 1}}, "terrace_steps"),
+                       ({"roads": {"markings": [1, 1]}}, "markings"),
+                       ({"weight": -1}, "weight")]:
         with pytest.raises(ValueError, match=where):
             parse_biome(bad)
     with pytest.raises(ValueError, match="empty definition"):
-        load_biome("jungle")  # still a 0-byte stub
+        load_biome("harbor")  # still a 0-byte stub
 
 
 # ----------------------------------------------------------------- regions
@@ -101,35 +128,41 @@ def test_the_world_is_a_ground_and_paths_agree(world):
     np.testing.assert_allclose(num, scalar[:, 1:], atol=2e-5)
 
 
-def test_biomes_come_in_blobs(world):
-    xs = np.arange(-4000.0, 4000.0, 20.0)
+def test_biomes_come_in_regions(world):
+    xs = np.arange(-6000.0, 6000.0, 25.0)
     gx, gz = np.meshgrid(xs, xs)
-    w = world.biome_weight(gx, gz)
-    assert 0.3 < (w >= 0.5).mean() < 0.7
-    # blobs: along a line the owner changes every few hundred metres, not every few
-    flips = np.count_nonzero(np.diff((w >= 0.5).astype(int), axis=1)) / len(xs)
-    assert 3 <= flips <= 25, f"{flips:.1f} biome changes per 8 km"
+    owner = world.biome_index(gx, gz)
+    share = np.bincount(owner.ravel(), minlength=len(world.biomes)) / owner.size
+    assert share.min() > 0.04, dict(zip(config.WORLD_BIOMES, share.round(3), strict=True))
+    # regions: along a line the owner changes every few hundred metres, not every few
+    flips = np.count_nonzero(np.diff(owner, axis=1)) / len(xs)
+    assert 4 <= flips <= 30, f"{flips:.1f} biome changes per 12 km"
+    w = world.regions.weights(gx.ravel()[:5000], gz.ravel()[:5000])[0]
+    np.testing.assert_allclose(w.sum(axis=1), 1.0)
 
 
-def test_biome_blend_has_no_cliffs(world):
-    x0, z0 = _border_point(world)
-    xs = np.arange(x0 - 400.0, x0 + 400.0, 0.5)
-    for dz in (0.0, 37.0, -81.0):
-        h, dhx, dhz = world.sample(xs, np.full_like(xs, z0 + dz))
-        assert np.abs(np.diff(h)).max() < 0.2   # 0.5 m apart: under a 40% slope
-        assert np.hypot(dhx, dhz).max() < 0.4
-    w = world.biome_weight(xs, np.full_like(xs, z0))
-    assert w.min() < 0.01 and w.max() > 0.99    # the line crosses the whole band
+def test_every_biome_border_stays_drivable(world):
+    borders = _borders(world)
+    assert len(borders) >= 10, f"only {len(borders)} biome pairs met"
+    for pair, (x0, z0, a) in borders.items():
+        s = np.arange(-300.0, 300.0, 0.5)   # across the border, along the probe
+        x, z = x0 + s * np.cos(a), z0 + s * np.sin(a)
+        h, dhx, dhz = world.regions.sample(x, z)
+        names = [world.biomes[i].name for i in pair]
+        assert np.abs(np.diff(h)).max() < 0.2, names   # 0.5 m apart: no step
+        assert np.hypot(dhx, dhz).max() < 0.4, names   # under 22 degrees
 
 
 def test_chunk_colours_follow_the_biome(world):
-    x0, z0 = _border_point(world)
-    for dx in (-300.0, 300.0):
-        x = x0 + dx
-        m = chunk_mesh(world, math.floor(x / SIZE), math.floor(z0 / SIZE))
-        rgb = m.color[:, :3].mean(axis=0)
-        sandy = world.biome_weight(x, z0) > 0.5
-        assert (rgb[0] > rgb[1]) == sandy, (dx, rgb)  # sand is red over green
+    for b in world.biomes:
+        x, z = world.regions.site_of(b.name)
+        key = (math.floor(x / SIZE), math.floor(z / SIZE))
+        m = chunk_mesh(world, *key)
+        assert (world.border_weight(m.pos[:, 0], m.pos[:, 2]) == 1.0).all()
+        t = b.terrain
+        want = terrain_colors(m.pos[:, 1] - t.base_height_m, m.normal, t.amplitude_m,
+                              t.colors, t.steep_slope_deg)
+        np.testing.assert_allclose(m.color, want, atol=1e-9)
 
 
 # ------------------------------------------------------------------- roads
@@ -164,14 +197,17 @@ def test_chunks_and_road_strips_meet_without_seams(world):
     # every road segment in the block is drawn by exactly one chunk, and the
     # strips of neighbouring chunks share their end vertices exactly
     lo, hi = -3 * SIZE, 3 * SIZE
-    expected = 0
+    expected = segments = 0
     for r in world.roads.roads_near(lo, lo, hi, hi):
         mid = 0.5 * (r.pts[:-1] + r.pts[1:])
-        expected += np.count_nonzero((mid >= lo).all(axis=1) & (mid < hi).all(axis=1))
+        inside = np.nonzero((mid >= lo).all(axis=1) & (mid < hi).all(axis=1))[0]
+        segments += len(inside)
+        dashes = np.count_nonzero(inside % 2 == 0) if r.markings is not None else 0
+        expected += 4 * len(inside) + 2 * dashes   # road quads + dashed centre line
     strips = [world.road_mesh(*key) for key in keys]
     strips = [s for s in strips if s is not None]
-    assert expected > 50
-    assert sum(len(s.tris) for s in strips) == 4 * expected
+    assert segments > 50
+    assert sum(len(s.tris) for s in strips) == expected
     verts = {}
     for s in strips:
         for p in s.pos:
@@ -185,7 +221,8 @@ def test_road_strips_sit_on_the_flattened_ground(world):
         if s is None:
             continue
         h = world.height(s.pos[:, 0], s.pos[:, 2])
-        np.testing.assert_allclose(s.pos[:, 1] - h, config.ROAD_LIFT_M, atol=1e-9)
+        lift = s.pos[:, 1] - h - config.ROAD_LIFT_M
+        assert np.all((np.abs(lift) < 1e-9) | (np.abs(lift - MARKING_LIFT) < 1e-9))
 
 
 def test_roads_are_flat_across_and_within_grade_along(world):
@@ -216,9 +253,10 @@ def test_off_road_is_offroad(world):
             assert world(x + dx, z + dz)[2] == SURFACE_OFFROAD
 
 
-def test_desert_keeps_every_second_grid_line(world):
+def test_sparse_biomes_keep_every_nth_grid_line(world):
     roads = world.roads
-    seen = {"plains": 0, "desert": 0}
+    assert roads.every["desert"] == 2 and roads.every["treacherous"] == 3
+    seen = dict.fromkeys(roads.every, 0)
     for i in range(-15, 15):
         for j in range(-15, 15):
             for kind, mid, line in [("h", ((i + 0.5) * roads.base, j * roads.base), j),
@@ -249,19 +287,29 @@ def _drive(world, x, z, heading, steer_fn, throttle_fn, ticks):
     return float(np.linalg.norm((v.pos - start)[[0, 2]])), on_road / ticks
 
 
-def test_car_follows_the_roads_for_25_seconds(world):
-    x, z, heading = world.spawn()
+def _start(world, biome):
+    """(x, z, heading) on the road nearest the middle of a ``biome`` region."""
+    return world.spawn(*world.regions.site_of(biome)) if biome else world.spawn()
+
+
+@pytest.mark.parametrize("biome", [None, *config.WORLD_BIOMES[2:]])
+def test_car_follows_the_roads_for_25_seconds(world, biome):
+    x, z, heading = _start(world, biome)
+    cruise = 16.0 if biome == "jungle" else 22.0  # narrow twisty lanes: ~58 km/h
     dist, on_road = _drive(
         world, x, z, heading,
         lambda v, f: world.road_steer(v.pos[0], v.pos[2], v.heading),
-        lambda v: 1.0 if np.linalg.norm(v.vel) < 22.0 else 0.0, round(25.0 / DT))
+        lambda v: 1.0 if np.linalg.norm(v.vel) < cruise else 0.0, round(25.0 / DT))
     assert dist > 250.0
     assert on_road > 0.9, f"on the road {on_road:.0%} of the time"
 
 
-@pytest.mark.parametrize("turn", [math.pi / 2, -math.pi / 2, 0.8])
-def test_car_crosses_roads_flat_out_for_25_seconds(world, turn):
-    x, z, heading = world.spawn()
+@pytest.mark.parametrize("biome, turn", [(None, math.pi / 2), (None, -math.pi / 2),
+                                         (None, 0.8), ("canyon", math.pi / 2),
+                                         ("treacherous", -math.pi / 2),
+                                         ("jungle", math.pi / 2)])
+def test_car_crosses_roads_flat_out_for_25_seconds(world, biome, turn):
+    x, z, heading = _start(world, biome)
 
     def flicks(v, f):  # a half-second steering flick each way every 4 s
         phase = (f // 30) % 8
