@@ -13,6 +13,7 @@ pygame channel, so pitch follows rpm continuously:
 """
 
 import logging
+import math
 import os
 
 import numpy as np
@@ -42,9 +43,31 @@ def sound_input(vehicle) -> SoundInput:
         throttle=vehicle.throttle_input,
         wheelspin=bool(vehicle.wheelspin),
         rear_airborne=vehicle.compression[1] == 0.0 and vehicle.compression[3] == 0.0,
-        slip=max(max(w.slip_lateral, w.slip_longitudinal) for w in vehicle.wheels),
-        handbrake=bool(vehicle.handbrake),
+        slip=skid_slip(vehicle),
     )
+
+
+def skid_slip(vehicle) -> float:
+    """Tyre slip the skid loop follows, m/s; 0 when no tyre is skidding.
+
+    handling.c CheckCarEffects screeches only with a rear wheel on the ground
+    and the rear axle sliding sideways (|hd.rear_vel| > 15000) or spinning.
+    Here: the sideways or spin slip of grounded rear tyres plus the slip of
+    grounded locked tyres (handbrake, braking lockup).  Front sideways slide
+    is left out (steered fronts slide a little in any turn), wheels in the air
+    are left out, and below SKID_SPEED_MIN nothing skids unless the rears spin.
+    """
+    if not vehicle.wheelspin and math.hypot(vehicle.vel[0], vehicle.vel[2]) < config.SKID_SPEED_MIN:
+        return 0.0
+    slip = 0.0
+    for i, w in enumerate(vehicle.wheels):
+        if w.compression <= 0.0:
+            continue
+        if i & 1:
+            slip = max(slip, w.slip_lateral, w.slip_longitudinal)
+        elif w.locked:
+            slip = max(slip, w.slip_longitudinal)
+    return slip
 
 
 def seamless(samples: np.ndarray, fade: int) -> np.ndarray:

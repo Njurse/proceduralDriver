@@ -85,11 +85,20 @@ def test_crossfade_keeps_power():
 
 
 def test_skid_hysteresis():
+    between = (config.SKID_SLIP_ON + config.SKID_SLIP_OFF) / 2.0
     model = EngineSound()
-    assert _settle(model, SoundInput(speed=20.0, slip=0.8), 0.5).skid_level == 0.0
-    assert _settle(model, SoundInput(speed=20.0, slip=2.0), 0.5).skid_level > 0.2
-    assert _settle(model, SoundInput(speed=20.0, slip=0.8), 0.5).skid_level > 0.1  # held
-    assert _settle(model, SoundInput(speed=20.0, slip=0.2), 1.5).skid_level < 0.01
+    assert _settle(model, SoundInput(speed=20.0, slip=between), 0.5).skid_level == 0.0
+    assert _settle(model, SoundInput(speed=20.0, slip=4.0), 0.5).skid_level > 0.2
+    assert _settle(model, SoundInput(speed=20.0, slip=between), 0.5).skid_level > 0.1  # held
+    assert _settle(model, SoundInput(speed=20.0, slip=0.5), 1.5).skid_level < 0.01
+
+
+def test_skid_volume_follows_slip():
+    levels = [_settle(EngineSound(), SoundInput(speed=20.0, slip=s), 0.5).skid_level
+              for s in (2.5, 5.0, config.SKID_SLIP_FULL, 20.0)]
+    assert levels[0] < levels[1] < levels[2]
+    assert levels[2] == pytest.approx(config.SKID_GAIN, abs=1e-3)
+    assert levels[3] == pytest.approx(config.SKID_GAIN, abs=1e-3)
 
 
 def test_loop_render_is_continuous_across_blocks():

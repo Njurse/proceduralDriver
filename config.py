@@ -112,12 +112,15 @@ ENGINE_GAIN_ON_LOAD = 1.0
 ENGINE_GAIN_OFF_LOAD = 0.45
 IDLE_GAIN = 0.6
 
-# Slip is the sideways (or locked/spinning) speed at a tyre's contact, m/s.
-# Normal hard cornering slides ~0.6 m/s; handbrake turns 0.8-1.5 m/s.
-SKID_SLIP_ON = 1.0
-SKID_SLIP_OFF = 0.5
-SKID_SLIP_FULL = 3.0
-SKID_GAIN = 0.7
+# Skid loop, after handling.c CheckCarEffects.  Slip is
+# core/vehicle_audio.skid_slip: the sideways or spin slip of grounded rear tyres
+# and the slip of grounded locked tyres, m/s.  Cornering on the stick keeps the
+# rears under ~1.9 m/s; a handbrake turn or a braking lockup is 15-30 m/s.
+SKID_SLIP_ON = 2.0
+SKID_SLIP_OFF = 1.4             # hysteresis: keeps skidding down to this
+SKID_SLIP_FULL = 8.0            # full volume from here
+SKID_LEVEL_MIN = 0.25           # share of SKID_GAIN while barely skidding
+SKID_GAIN = 1.4                 # skid.wav is quiet (RMS ~0.1)
 SKID_ATTACK_TIME = 0.04
 SKID_RELEASE_TIME = 0.2
-SKID_HB_SPEED_MIN = 4.0         # m/s
+SKID_SPEED_MIN = 3.0            # m/s over the ground; slower never skids (bar wheelspin)
