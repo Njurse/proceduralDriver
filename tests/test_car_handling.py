@@ -111,7 +111,10 @@ def _max_drift(handbrake):
             assert v.wheels[1].locked and v.wheels[3].locked
             assert not v.wheels[0].locked and not v.wheels[2].locked
         drift = max(drift, abs(_drift_deg(v)))
-        rear_slip = max(rear_slip, v.wheels[1].slip_lateral, v.wheels[3].slip_lateral)
+        # as a fraction of speed: the locked rears also scrub the speed off
+        speed = max(math.hypot(v.vel[0], v.vel[2]), 1e-6)
+        rear = max(v.wheels[1].slip_lateral, v.wheels[3].slip_lateral) / speed
+        rear_slip = max(rear_slip, rear)
     return drift, rear_slip
 
 
@@ -120,3 +123,65 @@ def test_handbrake_locks_rears_and_slides_the_tail():
     drift_steer, slip_steer = _max_drift(handbrake=False)
     assert drift_hb > drift_steer + 2.0  # degrees of extra body slip angle
     assert slip_hb > slip_steer
+
+
+def _pitch_deg(v):
+    """Nose-up is negative: rot[2, 1] is the forward axis' height."""
+    return math.degrees(math.asin(v.rot[2, 1]))
+
+
+# Stock game handling probe (JERICHO HOOKS.md / dev log, Chicago model 1,
+# same power/mass/traction): speed in u/frame at 1, 2, 3 and 4 s of full gas.
+STOCK_PROBE_SPEEDS = (67, 98, 130, 147)
+
+
+def test_launch_keeps_the_front_wheels_down():
+    v, world = _car()
+    v.process_input(_inp(throttle=1.0))
+    worst = 0.0
+    for _ in range(round(4.0 / DT)):
+        world.step(DT)
+        assert v.compression[0] > 0.0 or v.compression[2] > 0.0
+        worst = min(worst, _pitch_deg(v))
+    assert worst > -4.0
+
+
+def test_launch_speed_curve_matches_stock_probe():
+    v, world = _car()
+    v.process_input(_inp(throttle=1.0))
+    t60 = None
+    speeds = []
+    for i in range(1, round(10.0 / DT) + 1):
+        world.step(DT)
+        if t60 is None and v.forward_speed >= 26.8224:
+            t60 = i * DT
+        if i % round(1.0 / DT) == 0 and len(speeds) < 4:
+            speeds.append(v.forward_speed * 150.0 / 30.0)  # u/frame
+    assert 3.0 < t60 < 4.5  # 0-60 mph, seconds
+    for got, want in zip(speeds, STOCK_PROBE_SPEEDS, strict=True):
+        assert got == pytest.approx(want, abs=6.0)
+
+
+def test_upshifts_cut_the_thrust():
+    v, world = _car()
+    v.process_input(_inp(throttle=1.0))
+    cuts = 0
+    for _ in range(round(8.0 / DT)):
+        world.step(DT)
+        cuts += v.changing_gear
+    assert v.gear == 3
+    assert cuts > 0
+
+
+@pytest.mark.parametrize("throttle", [1.0, 0.0])
+def test_full_lock_at_speed_does_not_roll_over(throttle):
+    v, world = _car()
+    v.process_input(_inp(throttle=1.0))
+    while v.forward_speed < 30.0:
+        world.step(DT)
+    v.process_input(_inp(steer=1.0, throttle=throttle))
+    for _ in range(round(3.0 / DT)):
+        world.step(DT)
+        assert abs(_roll_deg(v)) < 20.0
+        assert v.rot[1, 1] > 0.9
+    assert abs(_drift_deg(v)) > 10.0 or v.forward_speed < 15.0  # slides, scrubs speed

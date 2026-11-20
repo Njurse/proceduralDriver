@@ -55,6 +55,16 @@ LIFT_MAX_DEPTH = dr2_length(800)
 LIFT_KILL_VY = dr2_length(120)
 LIFT_FRICTION = 67 / ONE
 LIFT_FRICTION_LIMIT = tuple(dr2_velocity(v) for v in (1005, 6030, 1005, 5025, 1884, 5025))
+# DEVIATION: tyre forces turn the body through a shortened vertical lever.
+# The stock player car uses the full contact-patch lever (wheelPos[1]); this
+# borrows AddWheelForcesDriver1's own pursuer "more stability" rule, which
+# scales that lever by 12/32 (gCopDifficultyLevel 2) or 19/32.  A float port
+# and an integer emulation of the stock code (tools/dr2_fixed_emu.py) both
+# lift the front wheels on launch and roll over at full lock, while the stock
+# game's handling probe speed curve (67/98/130/147 u/frame at 1-4 s) matches
+# the emulation only with the front wheels kept on the road.  The y entry
+# only multiplies the horizontal force components, exactly like the C rule.
+TYRE_LEVER_SCALE = np.array([1.0, 19.0 / 32.0, 1.0])
 SURFACE_ROAD = 0
 SURFACE_GRASS = 1
 
@@ -84,9 +94,16 @@ class CarGeometry:
 
     @classmethod
     def from_cosmetics(cls, cos) -> "CarGeometry":
+        wheel_disp = np.array(cos.wheel_disp, dtype=float)
+        c_points = np.array(cos.c_points, dtype=float)
+        # cosmetic.c FixCarCos: centre the wheelbase on the body origin by
+        # moving wheels and cPoints along z (C int division truncates to 0).
+        dz = float(int(-(wheel_disp[0, 2] + wheel_disp[1, 2] - 14) / 2))
+        wheel_disp[:, 2] += dz
+        c_points[:, 2] += dz
         return cls(
-            wheel_disp=np.array(cos.wheel_disp, dtype=float) / DR2_UNITS_PER_METRE,
-            c_points=np.array(cos.c_points, dtype=float) / DR2_UNITS_PER_METRE,
+            wheel_disp=wheel_disp / DR2_UNITS_PER_METRE,
+            c_points=c_points / DR2_UNITS_PER_METRE,
             inv_inertia_y=dr2_inverse_inertia(cos.twist_rate_y),
             inv_inertia_z=dr2_inverse_inertia(cos.twist_rate_z),
             wheel_radius=dr2_length(cos.wheel_size),
@@ -269,7 +286,7 @@ def car_forces(body, pad, geo: CarGeometry, dt: float, ground=flat_ground,
             coef *= n[1] * 1.25
         force = np.array([fx * coef, sus * n[1] - body.vel[1] * WHEEL_DRAG, fz * coef])
         acc += force
-        torque += np.cross(lever, force)
+        torque += np.cross(lever * TYRE_LEVER_SCALE, force)
 
     for i in range(4):
         body.compression[i] = wheels[i].compression
