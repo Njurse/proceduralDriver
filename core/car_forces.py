@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+import config
+from core.engine import gear_thrust_scale
 from core.physics_helpers import HANDLING_TYPES, get_friction_scales_driver1
 from core.units import (
     C_FRAME_HZ,
@@ -41,6 +43,14 @@ SUS_MAX = dr2_length(42)
 SUS_GLITCH = dr2_length(800)  # C: a compression this big reads as 12
 SUS_GLITCH_VALUE = dr2_length(12)
 WHEEL_DRAG = 12 * F / ONE  # 1/s per wheel (C: vel * 12 >> 12 per frame)
+# Terminal speed of the stock car: 2 driven wheels x 4915 thrust against
+# 4 wheels x 12/4096 drag per frame (~41 m/s).
+C_TOP_SPEED = dr2_velocity(2 * 4915 * ONE / (4 * 12))
+# DEVIATION: drag along the heading is scaled so full throttle in top gear
+# settles at config.CAR_TOP_SPEED_KMH; sideways drag keeps the C value, so
+# cornering and slides are unchanged.
+FORWARD_WHEEL_DRAG = (WHEEL_DRAG * C_TOP_SPEED * gear_thrust_scale(len(config.GEAR_RATIOS) - 1)
+                      / (config.CAR_TOP_SPEED_KMH / 3.6))
 FRICTION_DRY = (4096 * 32400 / 32768 + 500) / ONE  # (forcefac*(32400-wet)>>15)+500
 FRICTION_GRASS = (2048 * 32400 / 32768 + 500) / ONE
 SLIDE_CAP = dr2_velocity(12500)
@@ -174,7 +184,7 @@ def _cpoint_lift(pos, vel, avel, rot, geo, ground):
 
 
 def car_forces(body, pad, geo: CarGeometry, dt: float, ground=flat_ground,
-               hnd_type: int = 0) -> Forces:
+               hnd_type: int = 0, thrust_scale: float = 1.0) -> Forces:
     """One StepOneCar evaluation.  ``body`` has pos, vel, avel, rot,
     compression (4,); ``pad`` is the core.physics_helpers.PadState.
 
@@ -201,13 +211,16 @@ def car_forces(body, pad, geo: CarGeometry, dt: float, ground=flat_ground,
     stiff = lateral_stiffness(speed)
 
     wheels = [WheelOut() for _ in range(4)]
+    v_fwd = float(fwd_flat @ body.vel)
+    drag_x = body.vel[0] * WHEEL_DRAG + (FORWARD_WHEEL_DRAG - WHEEL_DRAG) * v_fwd * fwd_flat[0]
+    drag_z = body.vel[2] * WHEEL_DRAG + (FORWARD_WHEEL_DRAG - WHEEL_DRAG) * v_fwd * fwd_flat[2]
     grass0 = ground(*(body.pos + rot @ geo.wheel_disp[0])[[0, 2]])[2] == SURFACE_GRASS
     fr = get_friction_scales_driver1(
         thrust=pad.thrust, wheelspin=pad.wheelspin, handbrake=pad.handbrake,
         auto_brake=pad.auto_brake, wheel_speed=body.wheel_speed,
         front_on_grass=grass0, hnd_type=hnd_type,
         power_ratio=geo.power_ratio, traction=geo.traction)
-    thrust_acc = dr2_accel(fr.thrust * ONE)
+    thrust_acc = dr2_accel(fr.thrust * ONE) * thrust_scale  # DEVIATION: per-gear scale
     reset_auto_brake = False
     steer_dir = heading + pad.wheel_angle
     sx, sz = math.sin(steer_dir), math.cos(steer_dir)
@@ -278,8 +291,8 @@ def car_forces(body, pad, geo: CarGeometry, dt: float, ground=flat_ground,
                 fx += fac * sz * F
                 fz += -fac * sx * F
 
-        fx += sus * n[0] - side * lat[0] * F - body.vel[0] * WHEEL_DRAG
-        fz += sus * n[2] - side * lat[1] * F - body.vel[2] * WHEEL_DRAG
+        fx += sus * n[0] - side * lat[0] * F - drag_x
+        fz += sus * n[2] - side * lat[1] * F - drag_z
 
         coef = friction * tilt
         if n[1] < 0.8:

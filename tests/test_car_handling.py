@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import config  # noqa: E402
 from core.car_profile import load_cosmetics  # noqa: E402
 from core.redriver2_physics import TICK_HZ, PhysicsWorld, Vehicle  # noqa: E402
 
@@ -84,8 +85,10 @@ def test_settles_on_suspension_at_rest():
 def test_full_throttle_reaches_plausible_top_speed():
     v, world = _car()
     _run(v, world, 10.0, _inp(throttle=1.0))
+    assert 140.0 < v.forward_speed * 3.6 < 180.0
+    _run(v, world, 30.0, _inp(throttle=1.0))
     kmh = v.forward_speed * 3.6
-    assert 120.0 < kmh < 180.0
+    assert kmh == pytest.approx(config.CAR_TOP_SPEED_KMH, abs=5.0)
     assert abs(v.heading) < math.radians(2.0)  # tracks straight
     assert v.rot[1, 1] > 0.98  # upright
 
@@ -132,6 +135,8 @@ def _pitch_deg(v):
 
 # Stock game handling probe (JERICHO HOOKS.md / dev log, Chicago model 1,
 # same power/mass/traction): speed in u/frame at 1, 2, 3 and 4 s of full gas.
+# The C-exact model matched these to ~2 u/frame; config.GEAR_THRUST_SCALES now
+# softens the launch on purpose, so they are an upper bound.
 STOCK_PROBE_SPEEDS = (67, 98, 130, 147)
 
 
@@ -146,7 +151,7 @@ def test_launch_keeps_the_front_wheels_down():
     assert worst > -4.0
 
 
-def test_launch_speed_curve_matches_stock_probe():
+def test_launch_is_no_quicker_than_stock():
     v, world = _car()
     v.process_input(_inp(throttle=1.0))
     t60 = None
@@ -157,19 +162,22 @@ def test_launch_speed_curve_matches_stock_probe():
             t60 = i * DT
         if i % round(1.0 / DT) == 0 and len(speeds) < 4:
             speeds.append(v.forward_speed * 150.0 / 30.0)  # u/frame
-    assert 3.0 < t60 < 4.5  # 0-60 mph, seconds
-    for got, want in zip(speeds, STOCK_PROBE_SPEEDS, strict=True):
-        assert got == pytest.approx(want, abs=6.0)
+    assert 3.4 < t60 < 4.5  # 0-60 mph, seconds
+    for got, stock in zip(speeds, STOCK_PROBE_SPEEDS, strict=True):
+        assert stock * 0.6 < got < stock + 3.0
 
 
 def test_upshifts_cut_the_thrust():
     v, world = _car()
     v.process_input(_inp(throttle=1.0))
     cuts = 0
-    for _ in range(round(8.0 / DT)):
+    gears = []
+    for _ in range(round(12.0 / DT)):
         world.step(DT)
         cuts += v.changing_gear
-    assert v.gear == 3
+        if not gears or gears[-1] != v.gear:
+            gears.append(v.gear)
+    assert gears == [0, 1, 2, 3]
     assert cuts > 0
 
 

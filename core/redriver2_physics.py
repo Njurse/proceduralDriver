@@ -21,7 +21,7 @@ from core.car_forces import (
     car_forces,
     flat_ground,
 )
-from core.engine import EngineState, control_car_revs
+from core.engine import GearboxState, gear_thrust_scale, step_gearbox, wheel_rpm
 from core.physics_helpers import (
     CAR_PAD_ACCEL,
     CAR_PAD_BRAKE,
@@ -120,7 +120,7 @@ class Vehicle:
         self.rot = quat.to_matrix(self.quat)
         self.compression = np.full(4, -GRAVITY / (4.0 * SUS_STIFFNESS))
         self.pad_state = PadState()
-        self.engine = EngineState()
+        self.gearbox = GearboxState()
         self.wheel_speed = 0.0  # hd.wheel_speed, m/s along the heading
         for w in self.wheels:
             w.__init__()
@@ -146,15 +146,16 @@ class Vehicle:
 
     @property
     def changing_gear(self) -> bool:
-        return self.engine.changing_gear
-
-    @property
-    def revs(self) -> float:
-        return self.engine.revs
+        return self.gearbox.changing_gear
 
     @property
     def gear(self) -> int:
-        return self.engine.gear
+        return self.gearbox.gear
+
+    @property
+    def engine_rpm(self) -> float:
+        """Clutch-in rpm for the HUD (the sound model adds slip and idle)."""
+        return max(config.IDLE_RPM, wheel_rpm(self.forward_speed, self.gear))
 
     @property
     def wheel_angle(self) -> float:
@@ -194,18 +195,18 @@ class Vehicle:
             power_ratio=self.cos.power_ratio,
             wheel_speed=self.wheel_speed,
             hnd_type=self.hnd_type,
-            changing_gear=self.engine.changing_gear,
+            changing_gear=self.gearbox.changing_gear,
         )
-        f = car_forces(self, self.pad_state, self.geo, dt, self.ground, self.hnd_type)
+        f = car_forces(self, self.pad_state, self.geo, dt, self.ground, self.hnd_type,
+                       thrust_scale=gear_thrust_scale(self.gearbox.gear))
         ps = self.pad_state
         self.pad_state = PadState(ps.wheel_angle, -1.0 if f.reset_auto_brake else ps.auto_brake,
                                   f.thrust, ps.handbrake, f.wheelspin)
         self._integrate(f.acc, f.alpha, dt)
         self.wheel_speed = f.wheel_speed
-        self.engine = control_car_revs(
-            self.engine, dt, thrust=f.thrust, wheelspin=f.wheelspin,
-            rear_grounded=self.compression[1] > 0.0 or self.compression[3] > 0.0,
-            wheel_speed=f.wheel_speed)
+        self.gearbox = step_gearbox(
+            self.gearbox, dt, wheel_speed=f.wheel_speed,
+            rear_grounded=self.compression[1] > 0.0 or self.compression[3] > 0.0)
         self._update_wheels(f.wheels)
 
     def _integrate(self, acc, alpha, dt) -> None:

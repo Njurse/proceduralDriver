@@ -119,7 +119,7 @@ def main():
 
         # update audio state
         audio_state.speed = vehicle.speed
-        audio_state.revs = vehicle.revs
+        audio_state.revs = vehicle.engine_rpm * 4.0  # interim: C rev units
         audio_state.accelerating = vehicle.thrust != 0
         audio_state.handbrake = vehicle.handbrake
         audio_state.wheelspin = vehicle.wheelspin
@@ -172,7 +172,7 @@ def main():
             f"pos=({vx:.1f},{vz:.1f}) speed={vehicle.speed:.2f} heading={math.degrees(yaw):.1f}",
             f"throttle={vehicle.throttle_input:.2f} brake={vehicle.brake_input:.2f} steer={vehicle.steer_input:.2f}",
             f"wheel_angle={vehicle.wheel_angle} handbrake={vehicle.handbrake} auto_brake={vehicle.auto_brake}",
-            f"thrust={vehicle.thrust} gear={vehicle.gear} revs={vehicle.revs:.0f}",
+            f"thrust={vehicle.thrust} gear={vehicle.gear} rpm={vehicle.engine_rpm:.0f}",
             f"engine_vol={audio.engine_vol:.2f} idle_vol={audio.idle_vol:.2f} skid_vol={audio.skid_vol:.2f} skid={audio.skid_active}",
             f"fps={clock.get_fps():.1f}  verts={len(cos.mesh_vertices)} invert_vertical={cos.invert_vertical}",
             "W/S throttle/brake  A/D steer  LShift fast steer  Space handbrake  Esc quit",

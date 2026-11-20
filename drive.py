@@ -440,7 +440,7 @@ class DriveSim(ShowBase):
         v = self.vehicle
         st = self.audio_state
         st.speed = v.speed  # m/s
-        st.revs = v.revs
+        st.revs = v.engine_rpm * 4.0  # interim: old audio wants C rev units
         st.accelerating = v.thrust != 0
         st.handbrake = v.handbrake
         st.wheelspin = v.wheelspin
