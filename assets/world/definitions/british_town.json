@@ -36,6 +36,8 @@
     "loop_odds": 0.5,
     "l_corner_odds": 0.2,
     "corner_radius_m": 20.0,
+    "curve_bias": 0.6,
+    "curve_radius_m": 45.0,
     "roadside": {"side_m": 1.8, "color": [0.3, 0.45, 0.2], "edge_light": 0.1, "wall_h_m": 0.8, "wall_w_m": 0.5, "wall_color": [0.55, 0.52, 0.46]}
   },
   "structures": [

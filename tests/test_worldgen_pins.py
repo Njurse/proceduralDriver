@@ -20,12 +20,12 @@ PINS = {
     42: {
         "region_weights": "19c522eb6d58c642",
         "region_heights": "1eeff7674946a3f1",
-        "world_heights": "7b5161361b2fbc91",
+        "world_heights": "e2ae6e64170147f7",
         "chunk_meshes": "38fe428565cae69a",
         "road_meshes": "e1483bf848e9e608",
         "road_graph": "a9aac12c035d54ec",
-        "roads_near": "f8b268b10b38c88e",
-        "lanes": "35546f9fdc7542df",
+        "roads_near": "99d474ca054dcf81",
+        "lanes": "342670a55ddce161",
         "ground_query": "de7e884ebfa37d2c",
     },
     1977: {

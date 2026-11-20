@@ -25,6 +25,8 @@
     "curviness_m": 40.0,
     "l_corner_odds": 0.3,
     "corner_radius_m": 0.0,
+    "curve_bias": 0.8,
+    "curve_radius_m": 80.0,
     "width_m": 10.0,
     "shoulder_m": 10.0,
     "max_grade_pct": 7.0,
